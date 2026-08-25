@@ -1,23 +1,19 @@
 cff-version: 1.2.0
-message: >-
-  If you use this software, please cite the final PhasePair paper and software
-  release. The preferred paper citation will be added only after its metadata
-  and release identity are final.
-title: "PhasePair: phase-aware dyadic periodic motion-language retrieval"
+message: "If you use PhaseSet, please cite this software release and the accompanying paper when available."
+title: "PhaseSet: Permutation-Invariant Periodic Relation Tokens for Multi-Person Motion–Language Retrieval"
 type: software
 authors:
-  - name: "PhasePair contributors"
-repository-code: "https://github.com/appleweiping/phasepair-periodic-motion-language"
+  - name: "PhaseSet contributors"
+repository-code: "https://github.com/appleweiping/phaseset-multiperson-motion-language"
 license: MIT
-version: 0.1.0
+version: 0.2.0-alpha.1
 keywords:
+  - multi-person motion
   - motion-language retrieval
-  - periodic motion
-  - dyadic motion
-  - phase-aware representation
-  - reproducible research
+  - periodic relations
+  - permutation invariance
+  - skeleton sequences
 abstract: >-
-  Data-free reference implementation and auditable research artifacts for a
-  phase-aware dyadic periodic motion-language retrieval study. This software
-  record does not claim empirical results; restricted datasets and model
-  weights are not redistributed.
+  A data-free research implementation of streamed, permutation-invariant
+  periodic relation tokens for multi-person motion-language retrieval, with a
+  preserved PhasePair v0.1.0 compatibility namespace.
