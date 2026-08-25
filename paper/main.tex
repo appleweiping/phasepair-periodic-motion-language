@@ -1,0 +1,136 @@
+% DRAFT / AUTHORITY0 / NO_RESULT / NOT_FOR_SUBMISSION
+% This is a content skeleton, not an IEEE/ICASSP-template-bound manuscript.
+\documentclass[10pt,twocolumn]{article}
+\usepackage[letterpaper,margin=0.66in,columnsep=0.22in]{geometry}
+\usepackage{amsmath,amssymb,booktabs,array,microtype,xcolor}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[hidelinks]{hyperref}
+
+\definecolor{holdred}{RGB}{165,24,24}
+\newcommand{\DraftState}{\textcolor{holdred}{\textbf{DRAFT / AUTHORITY0 / NO\_RESULT / NOT\_FOR\_SUBMISSION}}}
+\newcommand{\ResultHold}{\textcolor{holdred}{\texttt{HOLD--NOT\_RUN}}}
+\newcommand{\BibHold}{\textcolor{holdred}{\texttt{BIB\_METADATA\_HOLD}}}
+
+\title{PhasePair: Score-Symmetric Dyadic Timing Residuals\\for Motion--Language Retrieval}
+\author{Anonymous Authors\\\DraftState}
+\date{}
+
+\begin{document}
+\maketitle
+\begin{center}
+\fbox{\parbox{0.94\linewidth}{\centering\DraftState\\
+No private data, model runtime, training run, score, statistical result, or submission authority is represented by this manuscript.}}
+\end{center}
+
+\begin{abstract}
+Dyadic motion descriptions can share coarse interaction semantics while differing in synchronization and relative timing. We study a deliberately narrow question: whether fixed, motion-derived complex relation evidence adds repeatable bidirectional retrieval utility to a qualified interaction-aware motion--language encoder. PhasePair pools six fixed Morlet bands over paired kinematic activity, forms ordered relation tokens, and adds a score-symmetric residual to a frozen MIME-style base. The registered comparison includes capacity-, marginal-frequency-, mean/difference-DCT-, relation-, and phase-family controls under matched residual-head capacity. This document specifies the method and sealed evaluation plan only. All empirical cells remain held because rights, assets, CLIP/runtime resolution, optimization, training, and test authority are absent.
+\end{abstract}
+
+\section{Introduction}
+Two-person actions such as coordinated exercise, dancing, or sparring can be textually similar even when their temporal relationship differs. A global interaction embedding may therefore align the action category while underrepresenting whether the actors move together, oppose one another, or exhibit a consistent relative phase. Existing work already occupies broad claims about interaction-aware motion--language encoding, frequency representations, and cross-wavelet analysis \cite{mime2026,interedit2026_hold,wamo2025_hold,grinsted2004,toiviainen2021}. Our claim boundary is consequently narrow: PhasePair is not a new motion backbone, not local cross-wavelet coherence, not causal lead--lag inference, and not an official reproduction of any baseline.
+
+We register one falsifiable contribution: a six-token, fixed-kinematic complex-relation residual whose final motion--text score is invariant to actor order by construction. The residual must improve over a strength-qualified in-house MIME adaptation and five matched controls. Until the complete experiment and authority chain closes, this contribution remains a hypothesis rather than a result.
+
+\section{Related Work and Claim Boundary}
+MIME provides the mandatory interaction-aware reference point; the locally captured primary record identifies \emph{MIME: Multimodal Interactive Motion Encoder}, arXiv:2607.22702v1, but no official public code or checkpoint was evidenced at capture time \cite{mime2026}. InterEdit-style mean/difference DCT energy and WaMo-style marginal wavelets motivate separate non-complex controls, not a joint surrogate \cite{interedit2026_hold,wamo2025_hold}. Cross-wavelet and movement-interaction analyses predate this work \cite{grinsted2004,toiviainen2021}; we therefore use the narrower term ``Morlet-derived pooled cross-spectrum and coherence-like normalization.''
+
+Structured relation alignment, interactive motion--language modeling, phase-aware retrieval, symmetry, and retrieval-benchmark concerns further close broad novelty claims \cite{sgar2025_hold,molam2025_hold,kinmo2025_hold,phasor2026_hold,intergen2024_hold,rig_hold,mrbench2026_hold}. Several of these records lack complete locally verified bibliographic metadata and are explicitly marked \BibHold{} in the bibliography. They must be replaced by independently verified records before submission.
+
+\section{Method}
+\subsection{Qualified base and score-symmetric residual}
+Under the registered method, the audited common adapter would produce ordered AB and BA motion passes for each actor pair. A future paper-audited, full-gallery-strength-qualified in-house MIME adaptation would supply frozen ordered motion embeddings and text embeddings; no such qualified runtime artifact exists at this draft state. It would not be described as an official MIME reproduction. Let the ordered global scores be dot products between normalized motion and text embeddings, and let an ordered residual head score six relation tokens. The only permitted final scoring rule is
+\begin{equation}
+\label{eq:score}
+\begin{aligned}
+G_{ij}&=\tfrac12\!\left(\langle g_i^{AB},t_j\rangle+\langle g_i^{BA},t_j\rangle\right),\\
+R_{ij}&=\tfrac12\!\left(r_{ij}^{AB}+r_{ij}^{BA}\right),\\
+S_{ij}&=\exp\!\bigl(\operatorname{clamp}(\ell_{\mathrm{MIME}},\log 1,\log 100)\bigr)
+          \left(G_{ij}+0.2R_{ij}\right).
+\end{aligned}
+\end{equation}
+The AB/BA average makes the score actor-swap invariant; it does not assert encoder equivariance. If all active relation masks are zero, the residual is defined as exactly zero and the score falls back to the same frozen base.
+
+\subsection{Six-band relation tokens}
+Five fixed body-group activity channels would be computed from pre-normalization kinematic positions and velocities. Six fixed complex Morlet sliding-window dots use center frequencies 0.75, 1.125, 1.6875, 2.53125, 3.796875, and 5.6953125 Hz, with three-cycle lengths 120, 80, 54, 36, 24, and 16 frames at 30 Hz. No padding, kernel reversal, or kernel conjugation is allowed. Within each band, same-name body groups would be pooled into two auto spectra and one cross spectrum; the latter defines a coherence-like magnitude, principal relative phase, and a wrapped phase-delay proxy. These are motion-derived descriptors, not physical or causal measurements.
+
+For band index $k\in\{1,\ldots,6\}$, the ordered 13-dimensional token and its fixed fields are
+\begin{equation}
+\label{eq:token}
+\begin{aligned}
+S_{AB,k}&=\operatorname*{mean}_{c,t}\overline{U_{A,k,c}[t]}U_{B,k,c}[t],\\
+\gamma_k^2&=\frac{|S_{AB,k}|^2}{(S_{AA,k}+10^{-12})(S_{BB,k}+10^{-12})},\\
+\phi_k&=\operatorname{Arg}(S_{AB,k}),\qquad
+\delta_k=-\frac{\phi_k}{2\pi f_k},\\
+\mathbf r_{AB,k}&=\bigl[\log(S_{AA,k}+10^{-12}),\\[-2pt]
+&\qquad \log(S_{BB,k}+10^{-12}),\gamma_k^2,\\[-2pt]
+&\qquad \cos\phi_k,\sin\phi_k,2f_k\delta_k,v_k,\\[-2pt]
+&\qquad \operatorname{onehot}_6(k)\bigr]\in\mathbb R^{13}.
+\end{aligned}
+\end{equation}
+Here $v_k$ is the signed-phase-valid bit. Swapping actors exchanges the auto spectra, preserves $\gamma_k^2$ and cosine, and changes the signs of sine and wrapped delay. Each token passes through the shared $13\!\rightarrow\!256\!\rightarrow\!512$ Linear--GELU--Dropout--Linear projector. Ordered projected-token similarities $d_{ijk}$ are pooled by the registered mask-aware rule $a_{ijk}=m_{ik}\exp(4d_{ijk})/\sum_l m_{il}\exp(4d_{ijl})$ and $r_{ij}^{\mathrm{ord}}=\sum_k a_{ijk}d_{ijk}$, with an exact zero residual when all slots are masked. Only the aggregated $R_{ij}$ in Eq.~\ref{eq:score} receives the fixed score-level coefficient 0.2; there is no learned filter, auxiliary phase loss, or delay loss.
+
+\begin{figure}[t]
+\centering
+\fbox{\parbox[c][1.18in][c]{0.94\columnwidth}{\centering
+\textbf{REPLACEABLE EDITABLE METHOD-FIGURE PLACEHOLDER}\\[3pt]
+common paired motion $\rightarrow$ frozen MIME AB/BA base\\
+fixed kinematic branch $\rightarrow$ six relation tokens\\
+shared projector $\rightarrow$ score-symmetric residual\\[3pt]
+Source deck: \footnotesize\nolinkurl{slides/PHASEPAIR_EDITABLE_PAPER_FIGURES_DATA_FREE_DRAFT.pptx}}}
+\caption{Method diagram placeholder. The cited repository PPTX contains only editable, no-result conceptual and protocol graphics. No third-party or private image is embedded here.}
+\label{fig:method}
+\end{figure}
+
+\subsection{Training objective}
+Batches are formed by motion/source cluster, and every official caption associated with the same motion cluster is a positive. The frozen base and each residual head share the same positive mask. The sole residual-training objective is symmetric multi-positive InfoNCE:
+\begin{equation}
+\label{eq:loss}
+\begin{aligned}
+\mathcal L_{m2t}&=-\frac1I\sum_i\left[\operatorname{LSE}_{j:P_{ij}=1}S_{ij}-\operatorname{LSE}_{j}S_{ij}\right],\\
+\mathcal L_{t2m}&=-\frac1J\sum_j\left[\operatorname{LSE}_{i:P_{ij}=1}S_{ij}-\operatorname{LSE}_{i}S_{ij}\right],\\
+\mathcal L&=\tfrac12\left(\mathcal L_{m2t}+\mathcal L_{t2m}\right).
+\end{aligned}
+\end{equation}
+Masked, max-shifted log-sum-exp is required. There is no swap or known-delay auxiliary objective; swap symmetry follows from Eq.~\ref{eq:score}, while known-delay behavior is only a data-free numerical diagnostic.
+
+\section{Registered Experiment Protocol}
+The census is fixed before any score exists. The seven systems are 00 MIME, 01 generic six-slot residual, 02 WaMo-style marginal-wavelet residual, 03 InterEdit-style mean/difference-DCT residual, 04 no-relation deletion, 05 phase-stripped deletion, and 06 PhasePair full. Seeds are 1729, 2718, and 31415, giving 21 score rows. Systems 01--06 require 18 residual-head runs. Before them, nine full base-qualification runs compare MIME, TMR-style early fusion, and TMR-style late fusion across the same three seeds, data, captions, crop, text initialization, objective, optimizer, 30 epochs, full validation gallery, and evaluator.
+
+The primary full-gallery endpoint is the equal-weight average of T2M cluster-macro R@1 and M2T any-caption R@1. H1 compares full with MIME; H2 with generic; H3 with WaMo-style marginal wavelets; H4 with InterEdit-style mean/difference DCT; H5 with no relation; and H6 with phase stripped. H2--H6 form the five-comparison Holm family. All six hypotheses require the registered deterministic effect, direction, and seed-stability gates before inference. Confirmatory inference is restricted to a one-shot sealed test using 100,000 shared source-cluster bootstrap draws; no score exists in this draft. Validation is development-only and cannot support a paper claim.
+
+\begin{table*}[t]
+\centering
+\caption{Registered full-gallery score matrix. Every one of the 21 seed cells is deliberately held. The macro makes absence conspicuous and must not be replaced before sealed result authorization.}
+\label{tab:results}
+\scriptsize
+\setlength{\tabcolsep}{2.4pt}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+System & 1729 & 2718 & 31415 & Aggregate \\
+\midrule
+00 MIME & \ResultHold & \ResultHold & \ResultHold & \ResultHold \\
+01 Generic & \ResultHold & \ResultHold & \ResultHold & \ResultHold \\
+02 WaMo-style & \ResultHold & \ResultHold & \ResultHold & \ResultHold \\
+03 InterEdit-style & \ResultHold & \ResultHold & \ResultHold & \ResultHold \\
+04 No relation & \ResultHold & \ResultHold & \ResultHold & \ResultHold \\
+05 Phase stripped & \ResultHold & \ResultHold & \ResultHold & \ResultHold \\
+06 PhasePair full & \ResultHold & \ResultHold & \ResultHold & \ResultHold \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\section{Discussion and Limitations}
+If every registered gate passes, the supported conclusion would remain conditional and narrow: fixed dyadic complex-relation evidence provided incremental, direction-free retrieval utility on the exact frozen gallery and protocol. It would not establish a broad first, causal timing, global lead--lag, local cross-wavelet coherence, encoder equivariance, or generalization beyond the frozen study. A generic-token win would suggest capacity rather than relation binding; failure against a relation control would reject the relation thesis; failure against phase stripping would reject the phase-family thesis. Any failed rights, integrity, runtime, optimizer, dropout, data-lineage, energy-floor, or statistical-assumption gate stops the claim.
+
+The fixed bands, pooled same-body-group statistic, principal wrapped delay, and source-cluster bootstrap define further limitations. The descriptor does not model all body-part cross-pairs, does not unwrap phase across bands, and does not infer actor roles from captions. Three seeds quantify only the registered training repetition; they do not define a seed population. The conditional bootstrap target is the exact frozen gallery and depends on its registered cluster assumptions.
+
+\section{Ethics and Rights}
+The intended dataset contains human-motion records and captions and is subject to non-commercial, controlled-host, no-redistribution constraints in the project contract. This draft accesses and exposes none of those assets. It includes no participant identifiers, raw motion, captions, rendered private samples, model weights, or private lineage. Dataset rights, owner disposition, final allowlist, and publication review must all pass before any empirical manuscript is prepared. The method must not be framed as inferring intent, identity, ability, or causality from motion.
+
+\section{Reproducibility Status}
+The public data-free core includes tested motion/text, residual, caption, sampler, validation, qualification, and statistical-reporting contracts, but that evidence is not an end-to-end experiment. Missing items include a qualified original-caption-to-tokenizer execution adapter, the remaining owner/license decisions, the target CUDA runtime, production execution receipts, checkpoints, scores, bootstrap outputs, authors, the official ICASSP class, and submission approval. Consequently this file is a technical-content skeleton only and must not be represented as a final submission.
+
+\bibliographystyle{unsrt}
+\bibliography{references}
+\end{document}

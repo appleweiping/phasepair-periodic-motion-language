@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: >-
+  If you use this software, please cite the final PhasePair paper and software
+  release. The preferred paper citation will be added only after its metadata
+  and release identity are final.
+title: "PhasePair: phase-aware dyadic periodic motion-language retrieval"
+type: software
+authors:
+  - name: "PhasePair contributors"
+repository-code: "https://github.com/appleweiping/phasepair-periodic-motion-language"
+license: MIT
+version: 0.1.0
+keywords:
+  - motion-language retrieval
+  - periodic motion
+  - dyadic motion
+  - phase-aware representation
+  - reproducible research
+abstract: >-
+  Data-free reference implementation and auditable research artifacts for a
+  phase-aware dyadic periodic motion-language retrieval study. This software
+  record does not claim empirical results; restricted datasets and model
+  weights are not redistributed.
