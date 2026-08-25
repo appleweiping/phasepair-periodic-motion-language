@@ -2,7 +2,7 @@
 
 **Evidence snapshot:** 2026-08-26 (Asia/Shanghai)
 **Research state:** `ACTIVE / AUTHORITY0 / NO_REAL_DATA_RESULT / NO_CLAIM`
-**Release target:** `v0.2.0 / PUBLIC_DATA_FREE_STABLE_CORE`
+**Release target:** `v0.2.1 / PUBLIC_DATA_FREE_STABLE_CORE_PORTABLE_TEST_HOTFIX`
 
 PhaseSet is the active multi-person successor to PhasePair. The in-place public
 migration and `v0.2.0-alpha.1` pre-release are complete; the immutable
@@ -113,7 +113,7 @@ deprecation notice linking PhaseSet and is archived without history rewrite.
 ## Release provenance boundary
 
 This source tree deliberately does not self-attest whether its declared
-version has been published. A `v0.2.0` release exists only when the external
+version has been published. A `v0.2.1` release exists only when the external
 annotated tag, GitHub release, Actions results, repository identity, complete
 asset inventory, and anonymous codeload receipts agree on the same commit and
 tree while the immutable `v0.1.0` object remains unchanged. A branch name,

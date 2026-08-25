@@ -18,7 +18,7 @@ jobs:
         include:
           - python: "3.12.0"
             install_target: ".[test]"
-            pytest_args: "--deselect=tests/test_phasepair_core_batching_readiness.py::ReadinessTests::test_signal_runtime_and_fake_torch_observation"
+            pytest_args: ""
           - python: "3.14.5"
             install_target: ".[signal,test]"
             pytest_args: ""

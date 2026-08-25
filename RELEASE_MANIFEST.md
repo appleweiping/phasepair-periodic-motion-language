@@ -1,7 +1,7 @@
 # PhaseSet public data-free release manifest
 
 **Manifest snapshot:** 2026-08-26 (Asia/Shanghai)
-**Source version:** `v0.2.0 / INTENDED_DATA_FREE_STABLE_CORE`
+**Source version:** `v0.2.1 / INTENDED_DATA_FREE_STABLE_CORE_PORTABLE_TEST_HOTFIX`
 **Scientific authority:** `AUTHORITY0 / NO_REAL_DATA_RESULT / NO_CLAIM`
 
 This manifest defines the public-safe PhaseSet source artifact. The source tree
@@ -119,6 +119,8 @@ separate evidence boundaries. Empty placeholders are not verification.
 - `v0.2.0-alpha.1`: PhaseSet identity, contracts, and migration pre-release.
 - an externally observed annotated `v0.2.0` tag: stable data-free multi-person
   core and runner after qualification;
+- an externally observed annotated `v0.2.1` tag: portable anonymous-install
+  verification hotfix with unchanged model and scientific contracts;
 - `v1.0.0`: real experimental aggregate, compliant paper, and complete public
   provenance, only if every external and scientific gate is genuinely closed.
 

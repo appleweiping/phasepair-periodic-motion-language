@@ -7,6 +7,18 @@ version. No empirical result or final paper release has been issued.
 
 ## Unreleased
 
+## 0.2.1 - 2026-08-26
+
+### Anonymous-install verification hotfix
+
+- Made the registered signal-oracle unit test construct its frozen Python and
+  NumPy observation explicitly instead of assuming that a portable `.[test]`
+  installation also selected the optional `.[signal]` dependency pins.
+- Added a separate observation test that follows the NumPy version actually
+  installed under the package's declared `numpy>=1.26,<3` compatibility range.
+- No model math, data contract, experiment contract, paper content, or
+  scientific authority changed. The immutable `v0.2.0` tag is not moved.
+
 ## 0.2.0 - 2026-08-26
 
 ### Stable data-free multi-person core
