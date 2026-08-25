@@ -18,7 +18,7 @@ SOURCE_FPS = 30
 TARGET_FPS = 20
 SOURCE_WINDOW_FRAMES = 300
 TARGET_WINDOW_FRAMES = 200
-MINIMUM_GROUP_SIZE = 3
+MINIMUM_GROUP_SIZE = 2
 MINIMUM_VALID_FRACTION = 0.95
 MAX_MISSING_SECONDS = 0.25
 # Missing duration is defined as run_length / SOURCE_FPS.  Seven frames are
@@ -109,7 +109,7 @@ def _observed_mask(
     if value.dtype != np.dtype(np.bool_) or value.ndim != 2:
         raise PreprocessingError("observed_mask must be a two-dimensional bool array")
     if value.shape[0] == 0 or value.shape[1] < MINIMUM_GROUP_SIZE:
-        raise PreprocessingError("observed_mask must describe T>0 and K>=3")
+        raise PreprocessingError("observed_mask must describe T>0 and K>=2")
     if frame_count is not None and value.shape[0] != frame_count:
         raise PreprocessingError("observed_mask frame count differs from motion")
     if participant_count is not None and value.shape[1] != participant_count:
@@ -373,7 +373,7 @@ def canonicalize_group(
         raise PreprocessingError("positions must end in xyz coordinates")
     frame_count, participant_count, joint_count, _ = motion.shape
     if participant_count < MINIMUM_GROUP_SIZE:
-        raise PreprocessingError("positions must contain K>=3 participants")
+        raise PreprocessingError("positions must contain K>=2 participants")
     if yaw.shape != (frame_count, participant_count):
         raise PreprocessingError("root_yaw shape must equal [T,K]")
     mask = _observed_mask(

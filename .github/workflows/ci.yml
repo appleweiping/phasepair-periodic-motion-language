@@ -49,6 +49,8 @@ jobs:
         run: python -m pip wheel --no-deps --wheel-dir dist .
       - name: Audit built wheel bytes
         run: python scripts/audit_release_artifact.py dist
+      - name: Bind wheel modules and metadata to the Git index
+        run: python scripts/verify_wheel_against_index.py dist
 
   portable-audit:
     name: Ubuntu public-tree and wheel audit
@@ -77,3 +79,5 @@ jobs:
         run: python -m pip wheel --no-deps --wheel-dir dist .
       - name: Audit built wheel bytes
         run: python scripts/audit_release_artifact.py dist
+      - name: Bind wheel modules and metadata to the Git index
+        run: python scripts/verify_wheel_against_index.py dist

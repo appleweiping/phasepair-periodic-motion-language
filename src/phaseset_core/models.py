@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 import math
 from typing import Final
@@ -10,7 +11,6 @@ import numpy as np
 import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
-from torch.utils.checkpoint import checkpoint
 
 from .contracts import (
     ACTIVITY_DIM,
@@ -24,13 +24,15 @@ from .contracts import (
 )
 from .periodic import (
     BAND_COUNT,
-    CANONICAL_MICROBLOCK_SIZE,
     DEFAULT_EDGE_CHUNK_SIZE,
+    PairChunk,
     ResourceLimitError,
     TOKEN_WIDTH,
     iter_unordered_pair_chunks,
     validate_energy_floors,
 )
+from .streaming_autograd import StreamingEdgeSummaries, streaming_edge_summaries
+from .torch_periodic import differentiable_edge_summaries
 
 
 STATUS: Final = "DATA_FREE_PHASESET_MODEL_NONPRODUCTION_AUTHORITY0"
@@ -72,60 +74,6 @@ def _fixed_binary_tree_sum(values: list[Tensor]) -> Tensor:
             next_level.append(level[-1])
         level = next_level
     return level[0]
-
-
-def _compensated_add(total: Tensor, correction: Tensor, value: Tensor) -> tuple[Tensor, Tensor]:
-    """Neumaier-accumulate canonical microblock sums componentwise."""
-
-    updated = total + value
-    use_total = torch.abs(total) >= torch.abs(value)
-    increment = torch.where(
-        use_total,
-        (total - updated) + value,
-        (value - updated) + total,
-    )
-    return updated, correction + increment
-
-
-def _chan_merge(
-    left_count: int,
-    left_mean: Tensor,
-    left_m2: Tensor,
-    right_count: int,
-    right_mean: Tensor,
-    right_m2: Tensor,
-) -> tuple[int, Tensor, Tensor]:
-    """Merge two population-moment states in a fixed order."""
-
-    if left_count == 0:
-        return right_count, right_mean, right_m2
-    if right_count == 0:
-        return left_count, left_mean, left_m2
-    count = left_count + right_count
-    delta = right_mean - left_mean
-    mean = left_mean + delta * (right_count / count)
-    m2 = (
-        left_m2
-        + right_m2
-        + delta * delta * (left_count * right_count / count)
-    )
-    return count, mean, m2
-
-
-def _fixed_tree_chan(values: list[Tensor]) -> tuple[int, Tensor, Tensor]:
-    """Create one Chan state using the same fixed adjacent tree as pair sums."""
-
-    if not values:
-        raise ValueError("Chan reduction requires at least one value")
-    states = [(1, value, torch.zeros_like(value)) for value in values]
-    while len(states) > 1:
-        next_states: list[tuple[int, Tensor, Tensor]] = []
-        for offset in range(0, len(states) - 1, 2):
-            next_states.append(_chan_merge(*states[offset], *states[offset + 1]))
-        if len(states) % 2:
-            next_states.append(states[-1])
-        states = next_states
-    return states[0]
 
 
 class SharedActorEncoder(nn.Module):
@@ -456,6 +404,69 @@ class SetPMABase(nn.Module):
         )
 
 
+SOCIAL_QUERY_CHUNK_SIZE: Final = 64
+SOCIAL_FRAME_ROW_CHUNK_SIZE: Final = 4
+
+
+def _streaming_social_self_attention(
+    attention: nn.MultiheadAttention,
+    values: Tensor,
+    actor_mask: Tensor,
+) -> Tensor:
+    """Exact self-attention algebra without materializing a full K-by-K score map."""
+
+    if (
+        values.ndim != 3
+        or actor_mask.shape != values.shape[:2]
+        or not attention._qkv_same_embed_dim
+        or attention.in_proj_weight is None
+    ):
+        raise PhaseSetModelError("streaming social attention received an invalid shape")
+    row_count, actor_count, width = values.shape
+    heads = attention.num_heads
+    head_dim = width // heads
+    projected = F.linear(values, attention.in_proj_weight, attention.in_proj_bias)
+    query, key, value = projected.chunk(3, dim=-1)
+    query = query.reshape(row_count, actor_count, heads, head_dim).transpose(1, 2)
+    key = key.reshape(row_count, actor_count, heads, head_dim).transpose(1, 2)
+    value = value.reshape(row_count, actor_count, heads, head_dim).transpose(1, 2)
+    result = torch.empty_like(query)
+    query_chunk = min(SOCIAL_QUERY_CHUNK_SIZE, max(1, actor_count - 1))
+    scale = head_dim**-0.5
+    for row_start in range(0, row_count, SOCIAL_FRAME_ROW_CHUNK_SIZE):
+        row_stop = min(row_count, row_start + SOCIAL_FRAME_ROW_CHUNK_SIZE)
+        local_key = key[row_start:row_stop]
+        local_value = value[row_start:row_stop]
+        local_mask = actor_mask[row_start:row_stop, None, None, :]
+        transposed_key = local_key.transpose(-2, -1)
+        for query_start in range(0, actor_count, query_chunk):
+            query_stop = min(actor_count, query_start + query_chunk)
+            local_query = query[
+                row_start:row_stop,
+                :,
+                query_start:query_stop,
+            ]
+            scores = torch.matmul(local_query * scale, transposed_key)
+            scores = scores.masked_fill(~local_mask, float("-inf"))
+            probabilities = torch.softmax(scores, dim=-1)
+            probabilities = F.dropout(
+                probabilities,
+                p=float(attention.dropout),
+                training=attention.training,
+            )
+            result[
+                row_start:row_stop,
+                :,
+                query_start:query_stop,
+            ] = torch.matmul(probabilities, local_value)
+    combined = result.transpose(1, 2).reshape(row_count, actor_count, width)
+    return F.linear(
+        combined,
+        attention.out_proj.weight,
+        attention.out_proj.bias,
+    ).contiguous()
+
+
 class SocialTemporalLayer(nn.Module):
     """One temporal-attention then per-frame actor-set-attention layer."""
 
@@ -519,12 +530,10 @@ class SocialTemporalLayer(nn.Module):
         valid_frame_rows = frame_actor_mask.any(dim=1)
         selected_frames = by_frame[valid_frame_rows]
         selected_frame_mask = frame_actor_mask[valid_frame_rows]
-        social, _ = self.social_attention(
+        social = _streaming_social_self_attention(
+            self.social_attention,
             selected_frames,
-            selected_frames,
-            selected_frames,
-            key_padding_mask=~selected_frame_mask,
-            need_weights=False,
+            selected_frame_mask,
         )
         selected_frames = self.social_norm(selected_frames + social)
         selected_frames = torch.where(
@@ -738,6 +747,42 @@ class PhaseSetEncoder(nn.Module):
         )
         return half_ij, half_ji, pair_tokens
 
+    def _iter_pair_chunks(
+        self,
+        batch: PreparedActivityBatch,
+        *,
+        edge_chunk_size: int,
+    ) -> Iterator[PairChunk]:
+        """Yield the registered edge stream.
+
+        Control systems may override this protected seam with a frozen,
+        non-phase feature stream.  The default remains the PhaseSet Morlet
+        stream and therefore preserves the public full-model behaviour.
+        """
+
+        return iter_unordered_pair_chunks(
+            batch,
+            energy_floors=self._energy_floors,
+            edge_chunk_size=edge_chunk_size,
+            edge_budget=self.edge_budget,
+        )
+
+    def _transform_edge_outputs(
+        self,
+        half_ij: Tensor,
+        half_ji: Tensor,
+        pair_tokens: Tensor,
+        support_mask: np.ndarray,
+        *,
+        batch_indices: np.ndarray,
+        actor_i: np.ndarray,
+        actor_j: np.ndarray,
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        """Identity hook used by the incidence-shuffled registered control."""
+
+        del actor_i, actor_j, batch_indices, support_mask
+        return half_ij, half_ji, pair_tokens
+
     def forward(
         self,
         batch: PreparedGroupBatch,
@@ -766,196 +811,77 @@ class PhaseSetEncoder(nn.Module):
         if type(include_topology) is not bool:
             raise TypeError("include_topology must be an exact built-in bool")
         checked = validate_prepared_activity_batch(batch)
-        device = self._device()
-        batch_size, padded_actors = checked.actor_mask.shape
-        width = self.embedding_dim
-
-        # Python-ordered accumulators preserve the canonical edge order across
-        # runtime chunk sizes and avoid GPU atomic scatter reductions.
-        pair_sums = [
-            [torch.zeros((width,), dtype=torch.float64, device=device) for _ in range(BAND_COUNT)]
-            for _ in range(batch_size)
-        ]
-        pair_corrections = [
-            [torch.zeros((width,), dtype=torch.float64, device=device) for _ in range(BAND_COUNT)]
-            for _ in range(batch_size)
-        ]
-        pair_counts = [[0 for _ in range(BAND_COUNT)] for _ in range(batch_size)]
-        node_means = [
-            [
-                [
-                    torch.zeros((width,), dtype=torch.float64, device=device)
-                    for _ in range(BAND_COUNT)
-                ]
-                for _ in range(padded_actors)
-            ]
-            for _ in range(batch_size)
-        ]
-        node_m2 = [
-            [
-                [
-                    torch.zeros((width,), dtype=torch.float64, device=device)
-                    for _ in range(BAND_COUNT)
-                ]
-                for _ in range(padded_actors)
-            ]
-            for _ in range(batch_size)
-        ]
-        node_degrees = [
-            [[0 for _ in range(BAND_COUNT)] for _ in range(padded_actors)]
-            for _ in range(batch_size)
-        ]
-
-        for chunk in iter_unordered_pair_chunks(
+        summaries = streaming_edge_summaries(
+            self,
             checked,
-            energy_floors=self._energy_floors,
             edge_chunk_size=edge_chunk_size,
+        )
+        return self._finish_summaries(
+            summaries,
+            actor_positions=tuple(
+                tuple(range(count)) for count in checked.actor_counts
+            ),
+            include_topology=include_topology,
+        )
+
+    def forward_skeleton_autograd_oracle(
+        self,
+        skeletons: Tensor,
+        actor_mask: Tensor,
+        frame_mask: Tensor,
+        track_mask: Tensor,
+        *,
+        include_topology: bool = True,
+    ) -> GroupTokenOutput:
+        """Run the explicit differentiable CPU skeleton/Morlet oracle.
+
+        This qualification path accepts arbitrary valid-actor positions and
+        retains gradients to ``skeletons``.  It shares the registered edge,
+        topology, and postprocess parameters with the production model.  The
+        production NumPy descriptor streamer remains intentionally distinct
+        and is not represented as differentiable by this method.
+        """
+
+        if type(include_topology) is not bool:
+            raise TypeError("include_topology must be an exact built-in bool")
+        summaries = differentiable_edge_summaries(
+            self,
+            skeletons,
+            actor_mask,
+            frame_mask,
+            track_mask,
+            energy_floors=self._energy_floors,
             edge_budget=self.edge_budget,
-        ):
-            edge_count = int(chunk.batch_indices.shape[0])
-            for micro_start in range(0, edge_count, CANONICAL_MICROBLOCK_SIZE):
-                micro_stop = min(
-                    micro_start + CANONICAL_MICROBLOCK_SIZE,
-                    edge_count,
-                )
-                relation_ij = torch.tensor(
-                    chunk.tokens_ij[micro_start:micro_stop],
-                    dtype=torch.float32,
-                    device=device,
-                )
-                relation_ji = torch.tensor(
-                    chunk.tokens_ji[micro_start:micro_stop],
-                    dtype=torch.float32,
-                    device=device,
-                )
-                if self.training:
-                    half_ij, half_ji, pair_tokens = checkpoint(
-                        self._edge_forward,
-                        relation_ij,
-                        relation_ji,
-                        use_reentrant=False,
-                    )
-                else:
-                    half_ij, half_ji, pair_tokens = self._edge_forward(
-                        relation_ij,
-                        relation_ji,
-                    )
+        )
+        actor_positions = tuple(
+            tuple(
+                int(position)
+                for position in torch.nonzero(row, as_tuple=False)[:, 0].tolist()
+            )
+            for row in actor_mask
+        )
+        return self._finish_summaries(
+            summaries,
+            actor_positions=actor_positions,
+            include_topology=include_topology,
+        )
 
-                pair_block: dict[tuple[int, int], list[Tensor]] = {}
-                node_block: dict[tuple[int, int, int], list[Tensor]] = {}
-                for local_edge, edge in enumerate(range(micro_start, micro_stop)):
-                    group = int(chunk.batch_indices[edge])
-                    left = int(chunk.actor_i[edge])
-                    right = int(chunk.actor_j[edge])
-                    for band in range(BAND_COUNT):
-                        if not bool(chunk.support_mask[edge, band]):
-                            continue
-                        pair_block.setdefault((group, band), []).append(
-                            pair_tokens[local_edge, band].to(dtype=torch.float64)
-                        )
-                        node_block.setdefault((group, left, band), []).append(
-                            half_ij[local_edge, band].to(dtype=torch.float64)
-                        )
-                        node_block.setdefault((group, right, band), []).append(
-                            half_ji[local_edge, band].to(dtype=torch.float64)
-                        )
+    def _finish_summaries(
+        self,
+        summaries: StreamingEdgeSummaries,
+        *,
+        actor_positions: tuple[tuple[int, ...], ...],
+        include_topology: bool,
+    ) -> GroupTokenOutput:
+        """Apply the shared topology and postprocess heads to edge summaries."""
 
-                for group, band in sorted(pair_block):
-                    values = pair_block[(group, band)]
-                    block_sum = _fixed_binary_tree_sum(values)
-                    pair_sums[group][band], pair_corrections[group][band] = (
-                        _compensated_add(
-                            pair_sums[group][band],
-                            pair_corrections[group][band],
-                            block_sum,
-                        )
-                    )
-                    pair_counts[group][band] += len(values)
-
-                for group, actor, band in sorted(node_block):
-                    block_state = _fixed_tree_chan(node_block[(group, actor, band)])
-                    merged = _chan_merge(
-                        node_degrees[group][actor][band],
-                        node_means[group][actor][band],
-                        node_m2[group][actor][band],
-                        *block_state,
-                    )
-                    node_degrees[group][actor][band] = merged[0]
-                    node_means[group][actor][band] = merged[1]
-                    node_m2[group][actor][band] = merged[2]
-
-        pair_rows: list[Tensor] = []
-        pair_count_rows: list[list[int]] = []
-        for group in range(batch_size):
-            bands: list[Tensor] = []
-            for band in range(BAND_COUNT):
-                count = pair_counts[group][band]
-                value = (
-                    (pair_sums[group][band] + pair_corrections[group][band]) / count
-                    if count
-                    else torch.zeros((width,), dtype=torch.float64, device=device)
-                )
-                bands.append(value.to(dtype=torch.float32))
-            pair_rows.append(torch.stack(bands))
-            pair_count_rows.append(pair_counts[group])
-        pair_component = torch.stack(pair_rows)
-        pair_count_tensor = torch.tensor(pair_count_rows, dtype=torch.int64, device=device)
+        device = self._device()
+        pair_component = summaries.pair_component
+        pair_count_tensor = summaries.valid_pair_count
         band_mask = pair_count_tensor > 0
-
-        global_halfedge_means: list[list[Tensor]] = []
-        for group, actor_count in enumerate(checked.actor_counts):
-            group_means: list[Tensor] = []
-            for band in range(BAND_COUNT):
-                count = 0
-                mean = torch.zeros((width,), dtype=torch.float64, device=device)
-                m2 = torch.zeros((width,), dtype=torch.float64, device=device)
-                for actor in range(actor_count):
-                    count, mean, m2 = _chan_merge(
-                        count,
-                        mean,
-                        m2,
-                        node_degrees[group][actor][band],
-                        node_means[group][actor][band],
-                        node_m2[group][actor][band],
-                    )
-                group_means.append(mean)
-            global_halfedge_means.append(group_means)
-
-        statistic_groups: list[Tensor] = []
-        topology_masks: list[list[list[bool]]] = []
-        for group, actor_count in enumerate(checked.actor_counts):
-            actor_statistics: list[Tensor] = []
-            actor_topology_masks: list[list[bool]] = []
-            possible_neighbors = actor_count - 1
-            for actor in range(padded_actors):
-                band_statistics: list[Tensor] = []
-                band_topology_masks: list[bool] = []
-                for band in range(BAND_COUNT):
-                    degree = node_degrees[group][actor][band] if actor < actor_count else 0
-                    if degree:
-                        mean = node_means[group][actor][band]
-                        moment = torch.clamp(
-                            node_m2[group][actor][band] / degree,
-                            min=0.0,
-                        )
-                    else:
-                        mean = torch.zeros((width,), dtype=torch.float64, device=device)
-                        moment = torch.zeros((width,), dtype=torch.float64, device=device)
-                    delta_mean = mean - global_halfedge_means[group][band]
-                    coverage = degree / possible_neighbors if actor < actor_count else 0.0
-                    scalars = torch.tensor(
-                        (coverage, 1.0 - coverage),
-                        dtype=torch.float64,
-                        device=device,
-                    )
-                    band_statistics.append(torch.cat((delta_mean, moment, scalars)))
-                    band_topology_masks.append(actor < actor_count and degree >= 2)
-                actor_statistics.append(torch.stack(band_statistics))
-                actor_topology_masks.append(band_topology_masks)
-            statistic_groups.append(torch.stack(actor_statistics))
-            topology_masks.append(actor_topology_masks)
-        statistics = torch.stack(statistic_groups).to(dtype=torch.float32)
-        topology_mask = torch.tensor(topology_masks, dtype=torch.bool, device=device)
+        statistics = summaries.node_statistics
+        topology_mask = summaries.topology_node_mask
+        topology_masks = topology_mask.tolist()
         raw_node_delta = self.topology_encoder(statistics)
         # The false branch is materialized +0.  The topology encoder remains in
         # the graph, so an all-K=2 batch receives allocated, exactly zero grads.
@@ -967,13 +893,13 @@ class PhaseSetEncoder(nn.Module):
 
         topology_rows: list[Tensor] = []
         topology_count_rows: list[list[int]] = []
-        for group, actor_count in enumerate(checked.actor_counts):
+        for group, positions in enumerate(actor_positions):
             bands = []
             counts = []
             for band in range(BAND_COUNT):
                 values = [
                     node_delta[group, actor, band].to(dtype=torch.float64)
-                    for actor in range(actor_count)
+                    for actor in positions
                     if topology_masks[group][actor][band]
                 ]
                 count = len(values)
@@ -986,7 +912,7 @@ class PhaseSetEncoder(nn.Module):
                     # K=2 produces allocated, bitwise-positive zero gradients.
                     linked_zeros = [
                         node_delta[group, actor, band].to(dtype=torch.float64)
-                        for actor in range(actor_count)
+                        for actor in positions
                     ]
                     value = _fixed_binary_tree_sum(linked_zeros).to(dtype=torch.float32)
                 bands.append(value)

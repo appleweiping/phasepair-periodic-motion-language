@@ -18,9 +18,11 @@ sys.dont_write_bytecode = True
 from public_release_audit import (  # noqa: E402
     PublicReleaseAuditError,
     _scan_bytes,
+    _scan_drawio,
     _scan_pdf,
     _scan_png,
     _scan_pptx,
+    _scan_svg,
     _validated_paths,
 )
 from release_tree import MANIFEST_HEADER, MANIFEST_RELATIVE, SHA256_PATTERN  # noqa: E402
@@ -37,6 +39,7 @@ SUPPORTED_SUFFIXES = (
     ".pptx",
     ".png",
     ".svg",
+    ".drawio",
     ".json",
     ".txt",
     ".md",
@@ -86,6 +89,10 @@ def _read_zip(raw: bytes, label: str) -> dict[PurePosixPath, bytes]:
                 mode = info.external_attr >> 16
                 if info.is_dir():
                     continue
+                if info.flag_bits & 0x1:
+                    raise ReleaseArtifactAuditError(
+                        f"encrypted ZIP member in {label}: {info.filename!r}"
+                    )
                 file_type = stat.S_IFMT(mode)
                 if file_type and file_type != stat.S_IFREG:
                     raise ReleaseArtifactAuditError(
@@ -161,6 +168,10 @@ def _scan_payload(raw: bytes, path: PurePosixPath, label: str) -> None:
         _scan_png(raw, label)
     elif suffix == ".pdf":
         _scan_pdf(raw, label)
+    elif suffix == ".svg":
+        _scan_svg(raw, label)
+    elif suffix == ".drawio":
+        _scan_drawio(raw, label)
     else:
         if b"\0" in raw:
             raise ReleaseArtifactAuditError(f"unexpected binary release member: {label}")
@@ -217,7 +228,13 @@ def _verify_embedded_manifest(members: dict[PurePosixPath, bytes], label: str) -
 
 
 def audit_artifact(path: Path, *, require_manifest: bool = False) -> tuple[int, int]:
+    if not path.is_file() or path.is_symlink():
+        raise ReleaseArtifactAuditError(f"release artifact is not a regular file: {path}")
+    if not path.name.casefold().endswith(SUPPORTED_SUFFIXES):
+        raise ReleaseArtifactAuditError(f"unsupported release artifact type: {path.name!r}")
     raw = path.read_bytes()
+    if len(raw) > MAX_ARCHIVE_BYTES:
+        raise ReleaseArtifactAuditError(f"release artifact exceeds size bound: {path.name!r}")
     label = path.name
     lower = label.casefold()
     if lower.endswith((".whl", ".zip")):
@@ -246,13 +263,27 @@ def _artifact_paths(inputs: list[str]) -> tuple[Path, ...]:
     for raw in inputs:
         path = Path(raw)
         if path.is_dir():
-            paths.extend(
-                candidate
-                for candidate in path.rglob("*")
-                if candidate.is_file()
-                and candidate.name.casefold().endswith(SUPPORTED_SUFFIXES)
-            )
-        elif path.is_file():
+            for candidate in path.rglob("*"):
+                if candidate.is_symlink():
+                    raise ReleaseArtifactAuditError(
+                        f"symlink in release artifact directory: {candidate}"
+                    )
+                if candidate.is_dir():
+                    continue
+                if not candidate.is_file():
+                    raise ReleaseArtifactAuditError(
+                        f"non-regular entry in release artifact directory: {candidate}"
+                    )
+                if not candidate.name.casefold().endswith(SUPPORTED_SUFFIXES):
+                    raise ReleaseArtifactAuditError(
+                        f"unsupported release artifact type: {candidate.name!r}"
+                    )
+                paths.append(candidate)
+        elif path.is_file() and not path.is_symlink():
+            if not path.name.casefold().endswith(SUPPORTED_SUFFIXES):
+                raise ReleaseArtifactAuditError(
+                    f"unsupported release artifact type: {path.name!r}"
+                )
             paths.append(path)
         else:
             raise ReleaseArtifactAuditError(f"artifact path does not exist: {raw!r}")
@@ -266,12 +297,27 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("paths", nargs="+")
     parser.add_argument(
+        "--expected-name",
+        action="append",
+        default=[],
+        help="repeat to require the exact audited artifact basename set",
+    )
+    parser.add_argument(
         "--require-manifest",
         action="store_true",
         help="require every archive to contain a manifest-bound release tree",
     )
     args = parser.parse_args(argv)
     artifacts = _artifact_paths(args.paths)
+    if args.expected_name:
+        expected_names = tuple(sorted(args.expected_name, key=lambda value: value.encode("utf-8")))
+        if len(set(expected_names)) != len(expected_names):
+            raise ReleaseArtifactAuditError("expected artifact names contain duplicates")
+        actual_names = tuple(sorted((path.name for path in artifacts), key=lambda value: value.encode("utf-8")))
+        if actual_names != expected_names:
+            raise ReleaseArtifactAuditError(
+                f"release artifact set differs: actual={actual_names!r} expected={expected_names!r}"
+            )
     total_members = 0
     total_bytes = 0
     for path in artifacts:

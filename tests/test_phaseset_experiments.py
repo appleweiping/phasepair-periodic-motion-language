@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError, replace
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -68,7 +69,7 @@ def test_every_residual_binds_all_base_runs_winner_checkpoint_and_seed_cache() -
     for row in plan.residual_runs:
         assert row.depends_on_run_ids == base_ids
         assert row.required_artifact_ids == (
-            "base-qualification-v1",
+            "base-qualification-v3",
             f"qualified-base-checkpoint-v1/{row.seed}",
             f"periodic-cache-v1/{row.seed}",
             "prepared-data-manifest-v1",
@@ -145,6 +146,12 @@ def _base_scores(
                 parameter_count=parameters[system_id],
                 frozen_runtime_latency_ns=latencies[system_id],
                 terminal_sha256=f"{index:064x}",
+                selected_checkpoint_sha256=f"{index + 100:064x}",
+                split="validation",
+                validation_manifest_sha256="a" * 64,
+                query_census_sha256="b" * 64,
+                evaluator_sha256="c" * 64,
+                score_artifact_sha256=f"{index + 200:064x}",
             )
         )
     return tuple(rows)
@@ -156,10 +163,27 @@ def test_complete_nine_rows_always_select_one_bound_winner() -> None:
     assert result.winner_system_name == "SetPMA"
     assert result.status == "WINNER_SELECTED_FROM_COMPLETE_NINE_ROWS"
     assert len(result.completion_sha256s) == 9
+    assert len(result.selected_checkpoint_sha256s) == 9
     assert len(result.winner_terminal_sha256s) == 3
+    assert len(result.winner_checkpoint_sha256s) == 3
+    assert len(result.score_artifact_sha256s) == 9
+    assert result.winner_checkpoint_sha256s == tuple(
+        result.selected_checkpoint_sha256s[
+            experiments.base_run_ids().index(
+                f"phaseset-run-v1/BASE_QUALIFICATION/{seed}/B1"
+            )
+        ]
+        for seed in experiments.SEEDS
+    )
     assert not hasattr(result, "verdict")
     raw = experiments.canonical_base_qualification_bytes(result)
     assert b'"winner_system_id":"B1"' in raw
+    assert b'"selected_checkpoint_sha256s"' in raw
+    assert b'"winner_checkpoint_sha256s"' in raw
+    assert b'"validation_manifest_sha256"' in raw
+    assert b'"query_census_sha256"' in raw
+    assert b'"evaluator_sha256"' in raw
+    assert b'"score_artifact_sha256s"' in raw
     assert b'"system_resource_rows"' in raw
     assert b'"authority":0' in raw
 
@@ -173,6 +197,14 @@ def test_base_tie_breaks_fewer_parameters_then_latency_then_smaller_id() -> None
         )
     )
     assert fewer.winner_system_id == "B1"
+    assert fewer.winner_checkpoint_sha256s == tuple(
+        fewer.selected_checkpoint_sha256s[
+            experiments.base_run_ids().index(
+                f"phaseset-run-v1/BASE_QUALIFICATION/{seed}/B1"
+            )
+        ]
+        for seed in experiments.SEEDS
+    )
 
     lower_latency = experiments.qualify_base(
         _base_scores(
@@ -182,6 +214,14 @@ def test_base_tie_breaks_fewer_parameters_then_latency_then_smaller_id() -> None
         )
     )
     assert lower_latency.winner_system_id == "B2"
+    assert lower_latency.winner_checkpoint_sha256s == tuple(
+        lower_latency.selected_checkpoint_sha256s[
+            experiments.base_run_ids().index(
+                f"phaseset-run-v1/BASE_QUALIFICATION/{seed}/B2"
+            )
+        ]
+        for seed in experiments.SEEDS
+    )
 
     smaller_id = experiments.qualify_base(
         _base_scores(
@@ -191,6 +231,14 @@ def test_base_tie_breaks_fewer_parameters_then_latency_then_smaller_id() -> None
         )
     )
     assert smaller_id.winner_system_id == "B0"
+    assert smaller_id.winner_checkpoint_sha256s == tuple(
+        smaller_id.selected_checkpoint_sha256s[
+            experiments.base_run_ids().index(
+                f"phaseset-run-v1/BASE_QUALIFICATION/{seed}/B0"
+            )
+        ]
+        for seed in experiments.SEEDS
+    )
 
 
 def test_base_qualification_requires_all_rows_and_stable_system_metadata() -> None:
@@ -202,6 +250,21 @@ def test_base_qualification_requires_all_rows_and_stable_system_metadata() -> No
     with pytest.raises(experiments.ExperimentContractError, match="agree across seeds"):
         experiments.qualify_base(tuple(rows))
 
+    jittered = list(_base_scores())
+    b0_latencies = (1_300, 900, 1_100)
+    for index, seed in enumerate(experiments.SEEDS):
+        run_id = f"phaseset-run-v1/BASE_QUALIFICATION/{seed}/B0"
+        row_index = experiments.base_run_ids().index(run_id)
+        jittered[row_index] = replace(
+            jittered[row_index],
+            frozen_runtime_latency_ns=b0_latencies[index],
+        )
+    qualified = experiments.qualify_base(tuple(jittered))
+    assert dict(
+        (system_id, latency)
+        for system_id, _parameter_count, latency in qualified.system_resource_rows
+    )["B0"] == 1_100
+
 
 def test_qualification_serializer_rejects_rebound_winner_terminals() -> None:
     result = experiments.qualify_base(_base_scores())
@@ -211,6 +274,24 @@ def test_qualification_serializer_rejects_rebound_winner_terminals() -> None:
     )
     with pytest.raises(experiments.ExperimentContractError, match="winner terminals"):
         experiments.canonical_base_qualification_bytes(forged)
+
+    rebound_checkpoint = replace(
+        result,
+        winner_checkpoint_sha256s=tuple(reversed(result.winner_checkpoint_sha256s)),
+    )
+    with pytest.raises(experiments.ExperimentContractError, match="winner checkpoints"):
+        experiments.canonical_base_qualification_bytes(rebound_checkpoint)
+
+    duplicate_checkpoints = replace(
+        result,
+        selected_checkpoint_sha256s=(
+            result.selected_checkpoint_sha256s[0],
+            result.selected_checkpoint_sha256s[0],
+            *result.selected_checkpoint_sha256s[2:],
+        ),
+    )
+    with pytest.raises(experiments.ExperimentContractError, match="checkpoints must be unique"):
+        experiments.canonical_base_qualification_bytes(duplicate_checkpoints)
 
     wrong_winner = replace(
         result,
@@ -222,6 +303,49 @@ def test_qualification_serializer_rejects_rebound_winner_terminals() -> None:
     )
     with pytest.raises(experiments.ExperimentContractError, match="tie-break"):
         experiments.canonical_base_qualification_bytes(wrong_winner)
+
+    alternate_rows = tuple(
+        replace(
+            row,
+            bidirectional_r1_numerator=(95 if row.run_id.endswith("/B1") else 10),
+            bidirectional_r1_denominator=100,
+        )
+        for row in result.score_rows
+    )
+    alternate = experiments.qualify_base(alternate_rows)
+    correlated_summary_forgery = replace(
+        result,
+        winner_system_id=alternate.winner_system_id,
+        winner_system_name=alternate.winner_system_name,
+        winner_parameter_count=alternate.winner_parameter_count,
+        winner_frozen_runtime_latency_ns=alternate.winner_frozen_runtime_latency_ns,
+        system_mean_rows=alternate.system_mean_rows,
+        system_resource_rows=alternate.system_resource_rows,
+        winner_terminal_sha256s=alternate.winner_terminal_sha256s,
+        winner_checkpoint_sha256s=alternate.winner_checkpoint_sha256s,
+        score_rows_sha256=alternate.score_rows_sha256,
+    )
+    with pytest.raises(experiments.ExperimentContractError, match="canonical nine-row"):
+        experiments.canonical_base_qualification_bytes(correlated_summary_forgery)
+
+    trusted_digest = hashlib.sha256(
+        experiments.canonical_base_qualification_bytes(result)
+    ).hexdigest()
+    with pytest.raises(experiments.ExperimentContractError, match="trusted expected"):
+        experiments.canonical_base_qualification_bytes(
+            alternate,
+            expected_sha256=trusted_digest,
+        )
+
+
+def test_base_qualification_rejects_duplicate_selected_checkpoint_receipts() -> None:
+    rows = list(_base_scores())
+    rows[1] = replace(
+        rows[1],
+        selected_checkpoint_sha256=rows[0].selected_checkpoint_sha256,
+    )
+    with pytest.raises(experiments.ExperimentContractError, match="selected checkpoints"):
+        experiments.qualify_base(tuple(rows))
 
 
 def test_residual_controls_are_within_inclusive_one_percent_of_full() -> None:

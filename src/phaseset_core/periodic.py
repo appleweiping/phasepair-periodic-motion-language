@@ -21,7 +21,7 @@ from . import morlet as phaseset_morlet
 STATUS: Final = "DATA_FREE_STREAMED_PAIR_WRAPPER_NONPRODUCTION_AUTHORITY0"
 BAND_COUNT: Final = 6
 TOKEN_WIDTH: Final = 13
-DEFAULT_EDGE_CHUNK_SIZE: Final = 64
+DEFAULT_EDGE_CHUNK_SIZE: Final = 256
 CANONICAL_MICROBLOCK_SIZE: Final = 64
 MORLET_FREQUENCIES_HZ: Final = phaseset_morlet.MORLET_FREQUENCIES_HZ
 
@@ -97,6 +97,33 @@ class _ActorResponse:
     response_mask: tuple[np.ndarray | None, ...]
 
 
+def _masked_self_power(response: np.ndarray, response_mask: np.ndarray) -> float:
+    """Pool one actor's Morlet power without consulting another actor."""
+
+    if (
+        response.ndim != 2
+        or response.shape[1] != 5
+        or response_mask.shape != response.shape
+    ):
+        raise PeriodicContractError("actor-local Morlet response has invalid shape")
+    sample_count, channels = response.shape
+    total = 0.0
+    count = 0
+    for channel in range(channels):
+        for time_index in range(sample_count):
+            if not bool(response_mask[time_index, channel]):
+                continue
+            value = complex(response[time_index, channel])
+            total = total + value.real * value.real + value.imag * value.imag
+            count += 1
+    if count == 0:
+        return 0.0
+    power = total / count
+    if not math.isfinite(power) or power < 0.0:
+        raise PeriodicContractError("actor-local Morlet power became nonfinite")
+    return power
+
+
 def _masked_cross_fields(
     left: np.ndarray,
     right: np.ndarray,
@@ -144,6 +171,29 @@ def _masked_cross_fields(
     return total_left / count, total_right / count, total_cross / count
 
 
+def _response_masks_for_actor(
+    valid_activity_mask: np.ndarray,
+    bands: tuple[phaseset_morlet.PhaseSetMorletBand, ...],
+    length_mask: np.ndarray,
+) -> tuple[np.ndarray | None, ...]:
+    """Derive Morlet-window observation masks without reading signal values."""
+
+    response_masks: list[np.ndarray | None] = []
+    for band_index, band in enumerate(bands):
+        if not bool(length_mask[band_index]):
+            response_masks.append(None)
+            continue
+        mask_windows = np.lib.stride_tricks.sliding_window_view(
+            valid_activity_mask,
+            band.length,
+            axis=0,
+        )
+        response_masks.append(
+            np.ascontiguousarray(mask_windows.all(axis=-1), dtype=np.bool_)
+        )
+    return tuple(response_masks)
+
+
 def _precompute_actor_responses(
     activities: np.ndarray,
     activity_mask: np.ndarray,
@@ -163,16 +213,19 @@ def _precompute_actor_responses(
             activities[actor, :valid_length], dtype=np.float64, order="C"
         )
         transformed_rows: list[np.ndarray | None] = []
-        response_masks: list[np.ndarray | None] = []
         valid_activity_mask = np.asarray(
             activity_mask[actor, :valid_length],
             dtype=np.bool_,
             order="C",
         )
+        response_masks = _response_masks_for_actor(
+            valid_activity_mask,
+            bands,
+            length_mask,
+        )
         for band_index, band in enumerate(bands):
             if not bool(length_mask[band_index]):
                 transformed_rows.append(None)
-                response_masks.append(None)
                 continue
             transformed = legacy_signal._sliding_complex_dot(  # noqa: SLF001
                 valid_activity,
@@ -180,16 +233,26 @@ def _precompute_actor_responses(
             )
             transformed = np.ascontiguousarray(transformed, dtype=np.complex128)
             transformed_rows.append(transformed)
-            mask_windows = np.lib.stride_tricks.sliding_window_view(
-                valid_activity_mask,
-                band.length,
-                axis=0,
-            )
-            response_masks.append(
-                np.ascontiguousarray(mask_windows.all(axis=-1), dtype=np.bool_)
-            )
-        actor_rows.append(_ActorResponse(tuple(transformed_rows), tuple(response_masks)))
+        actor_rows.append(_ActorResponse(tuple(transformed_rows), response_masks))
     return tuple(actor_rows), bands, length_mask
+
+
+def _actor_marginal_powers(
+    response: _ActorResponse,
+    length_mask: np.ndarray,
+) -> np.ndarray:
+    """Return six actor-local powers from only this actor's response and mask."""
+
+    powers = np.zeros((BAND_COUNT,), dtype=np.float64)
+    for band_index in range(BAND_COUNT):
+        if not bool(length_mask[band_index]):
+            continue
+        transformed = response.transformed[band_index]
+        response_mask = response.response_mask[band_index]
+        if transformed is None or response_mask is None:
+            raise AssertionError("length-valid actor-local Morlet response is missing")
+        powers[band_index] = _masked_self_power(transformed, response_mask)
+    return np.ascontiguousarray(powers)
 
 
 def _relation_from_cached_responses(
@@ -416,6 +479,223 @@ def _flush_chunk(
     )
 
 
+def _band_id_descriptor() -> np.ndarray:
+    tokens = np.zeros((BAND_COUNT, TOKEN_WIDTH), dtype=np.float32)
+    tokens[:, 7:] = np.eye(BAND_COUNT, dtype=np.float32)
+    return np.ascontiguousarray(tokens)
+
+
+def _marginal_power_descriptor(
+    source_power: np.ndarray,
+    target_power: np.ndarray,
+) -> np.ndarray:
+    """Combine two independently pooled endpoint marginals into one direction."""
+
+    if source_power.shape != (BAND_COUNT,) or target_power.shape != (BAND_COUNT,):
+        raise PeriodicContractError("actor marginal powers must have shape [6]")
+    tokens = _band_id_descriptor()
+    for band_index in range(BAND_COUNT):
+        tokens[band_index, 0] = np.float32(
+            math.log(float(source_power[band_index]) + legacy_signal.TOKEN_EPSILON)
+        )
+        tokens[band_index, 1] = np.float32(
+            math.log(float(target_power[band_index]) + legacy_signal.TOKEN_EPSILON)
+        )
+    return tokens
+
+
+def iter_marginal_power_pair_chunks(
+    batch: PreparedActivityBatch,
+    *,
+    edge_chunk_size: int = DEFAULT_EDGE_CHUNK_SIZE,
+    edge_budget: int | None = None,
+) -> Iterator[PairChunk]:
+    """Yield System-02 edges from independently pooled actor marginals.
+
+    Each actor/band power is computed once from only that actor's Morlet
+    response and observation mask.  Pair construction merely places the two
+    cached self-marginals into the directed endpoint slots.  Support is based
+    only on group-window length, so partner observation, energy, phase,
+    coherence, and cross-person sample availability cannot enter the stream.
+    """
+
+    chunk_size = validate_edge_chunk_size(edge_chunk_size)
+    checked = validate_prepared_activity_batch(batch)
+    required_edges = sum(
+        count * (count - 1) // 2 for count in checked.actor_counts
+    )
+    if edge_budget is not None:
+        budget = validate_edge_budget(edge_budget)
+        if required_edges > budget:
+            raise ResourceLimitError(
+                required_edges=required_edges,
+                edge_budget=budget,
+            )
+
+    batch_indices: list[int] = []
+    actor_i: list[int] = []
+    actor_j: list[int] = []
+    tokens_ij: list[np.ndarray] = []
+    tokens_ji: list[np.ndarray] = []
+    support_masks: list[np.ndarray] = []
+
+    for batch_index, actor_count in enumerate(checked.actor_counts):
+        valid_length = checked.valid_lengths[batch_index]
+        responses, _, length_mask = _precompute_actor_responses(
+            checked.activities[batch_index, :actor_count],
+            checked.activity_mask[batch_index, :actor_count],
+            valid_length,
+        )
+        marginal_powers = tuple(
+            _actor_marginal_powers(response, length_mask) for response in responses
+        )
+        support = np.ascontiguousarray(length_mask, dtype=np.bool_)
+        for left in range(actor_count):
+            for right in range(left + 1, actor_count):
+                batch_indices.append(batch_index)
+                actor_i.append(left)
+                actor_j.append(right)
+                tokens_ij.append(
+                    _marginal_power_descriptor(
+                        marginal_powers[left],
+                        marginal_powers[right],
+                    )
+                )
+                tokens_ji.append(
+                    _marginal_power_descriptor(
+                        marginal_powers[right],
+                        marginal_powers[left],
+                    )
+                )
+                support_masks.append(support)
+
+                if len(batch_indices) == chunk_size:
+                    yield _flush_chunk(
+                        batch_indices,
+                        actor_i,
+                        actor_j,
+                        tokens_ij,
+                        tokens_ji,
+                        support_masks,
+                    )
+                    batch_indices = []
+                    actor_i = []
+                    actor_j = []
+                    tokens_ij = []
+                    tokens_ji = []
+                    support_masks = []
+
+    if batch_indices:
+        yield _flush_chunk(
+            batch_indices,
+            actor_i,
+            actor_j,
+            tokens_ij,
+            tokens_ji,
+            support_masks,
+        )
+
+
+def iter_observation_availability_pair_chunks(
+    batch: PreparedActivityBatch,
+    *,
+    edge_chunk_size: int = DEFAULT_EDGE_CHUNK_SIZE,
+    edge_budget: int | None = None,
+) -> Iterator[PairChunk]:
+    """Yield System-05 support from observation masks and length alone.
+
+    A pair/band is supported when the band fits the group window and at least
+    one Morlet-response position/channel is jointly observed by both endpoints.
+    Signal values are never read while constructing either support or tokens.
+    """
+
+    chunk_size = validate_edge_chunk_size(edge_chunk_size)
+    checked = validate_prepared_activity_batch(batch)
+    required_edges = sum(
+        count * (count - 1) // 2 for count in checked.actor_counts
+    )
+    if edge_budget is not None:
+        budget = validate_edge_budget(edge_budget)
+        if required_edges > budget:
+            raise ResourceLimitError(
+                required_edges=required_edges,
+                edge_budget=budget,
+            )
+
+    bands = phaseset_morlet.morlet_kernel_bank()
+    generic = _band_id_descriptor()
+    batch_indices: list[int] = []
+    actor_i: list[int] = []
+    actor_j: list[int] = []
+    tokens_ij: list[np.ndarray] = []
+    tokens_ji: list[np.ndarray] = []
+    support_masks: list[np.ndarray] = []
+
+    for batch_index, actor_count in enumerate(checked.actor_counts):
+        valid_length = checked.valid_lengths[batch_index]
+        length_mask = phaseset_morlet.morlet_length_mask(valid_length)
+        response_masks = tuple(
+            _response_masks_for_actor(
+                np.asarray(
+                    checked.activity_mask[batch_index, actor, :valid_length],
+                    dtype=np.bool_,
+                    order="C",
+                ),
+                bands,
+                length_mask,
+            )
+            for actor in range(actor_count)
+        )
+        for left in range(actor_count):
+            for right in range(left + 1, actor_count):
+                support = np.zeros((BAND_COUNT,), dtype=np.bool_)
+                for band_index in range(BAND_COUNT):
+                    if not bool(length_mask[band_index]):
+                        continue
+                    left_mask = response_masks[left][band_index]
+                    right_mask = response_masks[right][band_index]
+                    if left_mask is None or right_mask is None:
+                        raise AssertionError(
+                            "length-valid observation response mask is missing"
+                        )
+                    support[band_index] = bool(
+                        np.logical_and(left_mask, right_mask).any()
+                    )
+
+                batch_indices.append(batch_index)
+                actor_i.append(left)
+                actor_j.append(right)
+                tokens_ij.append(generic)
+                tokens_ji.append(generic)
+                support_masks.append(np.ascontiguousarray(support))
+
+                if len(batch_indices) == chunk_size:
+                    yield _flush_chunk(
+                        batch_indices,
+                        actor_i,
+                        actor_j,
+                        tokens_ij,
+                        tokens_ji,
+                        support_masks,
+                    )
+                    batch_indices = []
+                    actor_i = []
+                    actor_j = []
+                    tokens_ij = []
+                    tokens_ji = []
+                    support_masks = []
+
+    if batch_indices:
+        yield _flush_chunk(
+            batch_indices,
+            actor_i,
+            actor_j,
+            tokens_ij,
+            tokens_ji,
+            support_masks,
+        )
+
+
 def iter_unordered_pair_chunks(
     batch: PreparedActivityBatch,
     *,
@@ -527,6 +807,8 @@ __all__ = [
     "ResourceLimitError",
     "STATUS",
     "TOKEN_WIDTH",
+    "iter_marginal_power_pair_chunks",
+    "iter_observation_availability_pair_chunks",
     "iter_unordered_pair_chunks",
     "unordered_pair_count",
     "validate_edge_chunk_size",

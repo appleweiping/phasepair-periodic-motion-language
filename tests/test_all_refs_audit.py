@@ -57,3 +57,35 @@ def test_all_refs_audit_rejects_a_removed_historical_endpoint(tmp_path: Path) ->
     rejected = _run(checkout)
     assert rejected.returncode == 1
     assert "credential or endpoint pattern" in rejected.stdout + rejected.stderr
+
+
+def test_all_refs_audit_checks_every_historical_path_binding_for_shared_blob(
+    tmp_path: Path,
+) -> None:
+    checkout = tmp_path / "checkout"
+    scripts = checkout / "scripts"
+    scripts.mkdir(parents=True)
+    for name in ("audit_all_refs.py", "public_release_audit.py", "release_tree.py"):
+        shutil.copy2(ROOT / "scripts" / name, scripts / name)
+    _git(checkout, "init", "--quiet")
+    _git(checkout, "config", "user.name", "PhaseSet Test")
+    _git(checkout, "config", "user.email", "test@example.invalid")
+
+    safe = checkout / "safe.txt"
+    safe.write_text("identical public bytes\n", encoding="utf-8")
+    _git(checkout, "add", "--all")
+    _git(checkout, "commit", "--quiet", "-m", "safe blob path")
+
+    forbidden = checkout / "private" / "record.txt"
+    forbidden.parent.mkdir()
+    forbidden.write_bytes(safe.read_bytes())
+    _git(checkout, "add", "--all")
+    _git(checkout, "commit", "--quiet", "-m", "same blob at forbidden path")
+    forbidden.unlink()
+    forbidden.parent.rmdir()
+    _git(checkout, "add", "--all")
+    _git(checkout, "commit", "--quiet", "-m", "remove forbidden binding")
+
+    rejected = _run(checkout)
+    assert rejected.returncode == 1
+    assert "forbidden tracked path" in rejected.stdout + rejected.stderr

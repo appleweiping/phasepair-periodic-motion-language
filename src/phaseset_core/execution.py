@@ -7,7 +7,7 @@ local attempt ledger, and an authority-zero preflight used by the public CLI.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 import hashlib
 import json
@@ -31,14 +31,15 @@ RESULT_CLAIMED = False
 STATUS = "AUTHORITY0_EXTERNAL_RECEIPTS_ABSENT_EXECUTION_HELD"
 ATTEMPT_SCHEMA = "phaseset-attempt-v1"
 HEARTBEAT_SCHEMA = "phaseset-heartbeat-v1"
-CHECKPOINT_SCHEMA = "phaseset-checkpoint-v1"
+CHECKPOINT_SCHEMA = "phaseset-checkpoint-v2"
 TERMINAL_SCHEMA = "phaseset-terminal-v1"
-RESUME_SCHEMA = "phaseset-resume-v1"
+RESUME_SCHEMA = "phaseset-resume-v2"
 PERIODIC_CACHE_SCHEMA = "phaseset-periodic-cache-v1"
-SEALED_TEST_SCHEMA = "phaseset-sealed-test-consumption-v1"
+SEALED_TEST_SCHEMA = "phaseset-sealed-test-consumption-v4"
+SEALED_TEST_EVALUATION_SCHEMA = "phaseset-sealed-test-evaluation-binding-v1"
 TRAINING_CONFIG_SCHEMA = "phaseset-training-config-v1"
 RUNTIME_ADMISSION_SCHEMA = "phaseset-runtime-admission-v1"
-COMMAND_RESULT_SCHEMA = "phaseset-command-result-v1"
+COMMAND_RESULT_SCHEMA = "phaseset-command-result-v2"
 
 COMMANDS = (
     "preflight",
@@ -119,6 +120,7 @@ class CheckpointRecord:
     dataloader_state_sha256: str
     dropout_state_sha256: str
     validation_state_sha256: str
+    checkpoint_payload_sha256: str
     parent_checkpoint_receipt_sha256: str | None
     schema: str = CHECKPOINT_SCHEMA
     authority: int = AUTHORITY
@@ -201,6 +203,7 @@ class CommandIntent:
     seed: int | None
     split: str | None
     plan_sha256: str
+    sealed_test_consumption_sha256: str | None = None
     runtime_mode: str = "PUBLIC_HOLD"
     admission_sha256: str | None = None
     authority: int = AUTHORITY
@@ -283,6 +286,7 @@ class CommandResult:
     runtime_mode: str
     authority: int
     production: bool
+    sealed_test_consumption_sha256: str | None = None
     result_claimed: bool = RESULT_CLAIMED
     schema: str = COMMAND_RESULT_SCHEMA
 
@@ -299,6 +303,9 @@ class RuntimeAdapter(Protocol):
 
     def handle(self, intent: CommandIntent) -> CommandResult:
         """Execute one already-admitted command intent."""
+
+    def consume_sealed_test(self, intent: CommandIntent) -> str:
+        """Authenticate and durably consume the sole test grant."""
 
 
 def _canonical_json_bytes(value: object) -> bytes:
@@ -509,6 +516,15 @@ def canonical_command_result_bytes(record: object) -> bytes:
     if len(set(record.artifact_sha256s)) != len(record.artifact_sha256s):
         raise ExecutionContractError("command result artifact digests must be unique")
     _sha256(record.admission_sha256, "admission_sha256")
+    if record.command == "evaluate" and record.split == "test":
+        _sha256(
+            record.sealed_test_consumption_sha256,
+            "sealed_test_consumption_sha256",
+        )
+    elif record.sealed_test_consumption_sha256 is not None:
+        raise ExecutionContractError(
+            "only sealed-test evaluation may bind a test consumption receipt"
+        )
     if record.result_claimed is not False:
         raise ExecutionContractError("command result cannot claim a scientific result")
 
@@ -545,6 +561,7 @@ def canonical_command_result_bytes(record: object) -> bytes:
             "run_id": record.run_id,
             "runtime_mode": record.runtime_mode,
             "schema": record.schema,
+            "sealed_test_consumption_sha256": record.sealed_test_consumption_sha256,
             "seed": record.seed,
             "split": record.split,
         }
@@ -626,6 +643,9 @@ def canonical_checkpoint_bytes(record: object) -> bytes:
         {
             "attempt_id": record.attempt_id,
             "authority": record.authority,
+            "checkpoint_payload_sha256": _sha256(
+                record.checkpoint_payload_sha256, "checkpoint_payload_sha256"
+            ),
             "dataloader_state_sha256": _sha256(
                 record.dataloader_state_sha256, "dataloader_state_sha256"
             ),
@@ -954,6 +974,18 @@ def _heartbeat_artifacts(
     rows.sort(key=lambda item: item[0].sequence)
     if tuple(row[0].sequence for row in rows) != tuple(range(len(rows))):
         raise ExecutionContractError("heartbeat ledger is not contiguous")
+    for ordinal, (record, _, raw) in enumerate(rows):
+        if ordinal == 0:
+            if record.previous_heartbeat_sha256 is not None:
+                raise ExecutionContractError("first heartbeat cannot bind a predecessor")
+            continue
+        previous_record, _, previous_raw = rows[ordinal - 1]
+        if record.global_step < previous_record.global_step:
+            raise ExecutionContractError("heartbeat global_step cannot move backward")
+        if record.previous_heartbeat_sha256 != artifact_sha256(previous_raw):
+            raise ExecutionContractError("heartbeat predecessor digest mismatch")
+        if artifact_sha256(raw) == artifact_sha256(previous_raw):
+            raise ExecutionContractError("heartbeat ledger contains duplicate artifacts")
     return tuple(rows)
 
 
@@ -977,7 +1009,162 @@ def _checkpoint_artifacts(
     rows.sort(key=lambda item: item[0].global_step)
     if len({row[0].global_step for row in rows}) != len(rows):
         raise ExecutionContractError("checkpoint ledger contains a duplicate global_step")
+    for ordinal, (record, _, _) in enumerate(rows):
+        if ordinal == 0:
+            if record.parent_checkpoint_receipt_sha256 is not None:
+                raise ExecutionContractError("first checkpoint cannot bind a parent")
+            continue
+        previous_raw = rows[ordinal - 1][2]
+        if record.parent_checkpoint_receipt_sha256 != artifact_sha256(previous_raw):
+            raise ExecutionContractError("checkpoint parent digest mismatch")
     return tuple(rows)
+
+
+@dataclass(frozen=True, slots=True)
+class _VerifiedAttemptLedger:
+    attempt: AttemptRecord
+    attempt_raw: bytes
+    heartbeats: tuple[tuple[HeartbeatRecord, Path, bytes], ...]
+    checkpoints: tuple[tuple[CheckpointRecord, Path, bytes], ...]
+    terminal: TerminalRecord | None
+    terminal_raw: bytes | None
+    resume: ResumeRecord | None
+    resume_raw: bytes | None
+
+
+def _attempt_root(root: str | Path) -> Path:
+    checked = Path(root)
+    if checked.is_symlink() or not checked.is_dir():
+        raise ExecutionContractError("attempt root must be an existing non-symlink directory")
+    return checked
+
+
+def _verify_local_attempt(path: Path, expected_attempt_id: str) -> _VerifiedAttemptLedger:
+    if path.is_symlink() or not path.is_dir():
+        raise ExecutionContractError("attempt directory is absent or a symlink")
+    attempt_raw = _read_regular(path / "attempt.json", "attempt artifact")
+    attempt = parse_attempt_bytes(attempt_raw)
+    if attempt.attempt_id != expected_attempt_id:
+        raise ExecutionContractError("attempt directory does not match its receipt")
+
+    heartbeats = _heartbeat_artifacts(path / "heartbeats")
+    checkpoints = _checkpoint_artifacts(path / "checkpoints")
+    for record, _, _ in heartbeats:
+        if (record.attempt_id, record.run_id) != (attempt.attempt_id, attempt.run_id):
+            raise ExecutionContractError("heartbeat identity does not match attempt")
+    for record, _, _ in checkpoints:
+        if (record.attempt_id, record.run_id) != (attempt.attempt_id, attempt.run_id):
+            raise ExecutionContractError("checkpoint identity does not match attempt")
+
+    terminal_path = path / "terminal.json"
+    terminal: TerminalRecord | None = None
+    terminal_raw: bytes | None = None
+    if terminal_path.exists() or terminal_path.is_symlink():
+        terminal_raw = _read_regular(terminal_path, "terminal artifact")
+        terminal = parse_terminal_bytes(terminal_raw)
+        if (terminal.attempt_id, terminal.run_id) != (attempt.attempt_id, attempt.run_id):
+            raise ExecutionContractError("terminal identity does not match attempt")
+        if terminal.attempt_receipt_sha256 != artifact_sha256(attempt_raw):
+            raise ExecutionContractError("terminal attempt digest mismatch")
+        expected_heartbeat = artifact_sha256(heartbeats[-1][2]) if heartbeats else None
+        if terminal.latest_heartbeat_sha256 != expected_heartbeat:
+            raise ExecutionContractError("terminal latest heartbeat digest mismatch")
+        expected_checkpoint = artifact_sha256(checkpoints[-1][2]) if checkpoints else None
+        if terminal.latest_checkpoint_receipt_sha256 != expected_checkpoint:
+            raise ExecutionContractError("terminal latest checkpoint digest mismatch")
+
+    resume_path = path / "resume.json"
+    resume: ResumeRecord | None = None
+    resume_raw: bytes | None = None
+    if resume_path.exists() or resume_path.is_symlink():
+        resume_raw = _read_regular(resume_path, "resume artifact")
+        resume = parse_resume_bytes(resume_raw)
+        if (
+            resume.new_attempt_id != attempt.attempt_id
+            or resume.run_id != attempt.run_id
+            or resume.created_at_utc != attempt.created_at_utc
+        ):
+            raise ExecutionContractError("resume identity does not match its new attempt")
+
+    return _VerifiedAttemptLedger(
+        attempt=attempt,
+        attempt_raw=attempt_raw,
+        heartbeats=heartbeats,
+        checkpoints=checkpoints,
+        terminal=terminal,
+        terminal_raw=terminal_raw,
+        resume=resume,
+        resume_raw=resume_raw,
+    )
+
+
+def _validate_resume_source(
+    resume: ResumeRecord,
+    predecessor: _VerifiedAttemptLedger,
+) -> CheckpointRecord:
+    canonical_resume_bytes(resume)
+    if predecessor.attempt.attempt_id != resume.predecessor_attempt_id:
+        raise ExecutionContractError("resume predecessor identity mismatch")
+    terminal = predecessor.terminal
+    terminal_raw = predecessor.terminal_raw
+    if terminal is None or terminal_raw is None:
+        raise ExecutionContractError("resume predecessor has no immutable terminal")
+    if terminal.outcome == "SUCCEEDED":
+        raise ExecutionContractError("successful attempts cannot be resumed")
+    if terminal.run_id != resume.run_id:
+        raise ExecutionContractError("resume run_id differs from predecessor")
+    if artifact_sha256(terminal_raw) != resume.predecessor_terminal_sha256:
+        raise ExecutionContractError("resume predecessor terminal digest mismatch")
+    if terminal.latest_checkpoint_receipt_sha256 != resume.checkpoint_receipt_sha256:
+        raise ExecutionContractError("resume checkpoint does not match predecessor terminal")
+    if not predecessor.checkpoints:
+        raise ExecutionContractError("resume predecessor has no verified checkpoint")
+    checkpoint, _, checkpoint_raw = predecessor.checkpoints[-1]
+    if artifact_sha256(checkpoint_raw) != resume.checkpoint_receipt_sha256:
+        raise ExecutionContractError("resume checkpoint receipt is absent from predecessor")
+    return checkpoint
+
+
+def _verify_attempt_chain(
+    root: Path,
+    attempt_id: str,
+    visited: frozenset[str] = frozenset(),
+) -> _VerifiedAttemptLedger:
+    if attempt_id in visited:
+        raise ExecutionContractError("resume predecessor chain contains a cycle")
+    ledger = _verify_local_attempt(root / attempt_id, attempt_id)
+    if ledger.resume is not None:
+        predecessor = _verify_attempt_chain(
+            root,
+            ledger.resume.predecessor_attempt_id,
+            visited | {attempt_id},
+        )
+        _validate_resume_source(ledger.resume, predecessor)
+        if (
+            ledger.attempt.plan_sha256 != predecessor.attempt.plan_sha256
+            or ledger.attempt.matrix_sha256 != predecessor.attempt.matrix_sha256
+            or ledger.attempt.training_config_sha256
+            != predecessor.attempt.training_config_sha256
+        ):
+            raise ExecutionContractError("resumed attempt changed a frozen plan binding")
+    return ledger
+
+
+def verified_resume_checkpoint_payload_sha256(
+    root: str | Path,
+    resume: object,
+) -> str:
+    """Return the payload digest only after revalidating the complete resume chain."""
+
+    if type(resume) is not ResumeRecord:
+        raise TypeError("resume must be exact ResumeRecord")
+    resume_raw = canonical_resume_bytes(resume)
+    checked_root = _attempt_root(root)
+    current = _verify_attempt_chain(checked_root, resume.new_attempt_id)
+    if current.resume is None or current.resume_raw != resume_raw:
+        raise ExecutionContractError("stored resume record differs from the requested binding")
+    predecessor = _verify_attempt_chain(checked_root, resume.predecessor_attempt_id)
+    return _validate_resume_source(resume, predecessor).checkpoint_payload_sha256
 
 
 class AttemptStore:
@@ -994,9 +1181,7 @@ class AttemptStore:
         if type(record) is not AttemptRecord:
             raise TypeError("record must be exact AttemptRecord")
         raw = canonical_attempt_bytes(record)
-        checked_root = Path(root)
-        if not checked_root.is_dir() or checked_root.is_symlink():
-            raise ExecutionContractError("attempt root must be an existing non-symlink directory")
+        checked_root = _attempt_root(root)
         path = checked_root / record.attempt_id
         path.mkdir(mode=0o700, exist_ok=False)
         (path / "heartbeats").mkdir(mode=0o700)
@@ -1007,15 +1192,9 @@ class AttemptStore:
     @classmethod
     def open(cls, root: str | Path, attempt_id: object) -> AttemptStore:
         checked_id = _attempt_id(attempt_id)
-        checked_root = Path(root)
-        path = checked_root / checked_id
-        if path.is_symlink() or not path.is_dir():
-            raise ExecutionContractError("attempt directory is absent or a symlink")
-        raw = _read_regular(path / "attempt.json", "attempt artifact")
-        record = parse_attempt_bytes(raw)
-        if record.attempt_id != checked_id:
-            raise ExecutionContractError("attempt directory does not match its receipt")
-        return cls(path, record)
+        checked_root = _attempt_root(root)
+        ledger = _verify_attempt_chain(checked_root, checked_id)
+        return cls(checked_root / checked_id, ledger.attempt)
 
     @classmethod
     def create_resumed(
@@ -1037,23 +1216,23 @@ class AttemptStore:
             or new_attempt.created_at_utc != resume.created_at_utc
         ):
             raise ExecutionContractError("new attempt identity does not match resume record")
-        predecessor = cls.open(root, resume.predecessor_attempt_id)
-        terminal_path = predecessor.path / "terminal.json"
-        if not terminal_path.is_file() or terminal_path.is_symlink():
-            raise ExecutionContractError("resume predecessor has no immutable terminal")
-        terminal_raw = _read_regular(terminal_path, "terminal artifact")
-        terminal = parse_terminal_bytes(terminal_raw)
-        if terminal.outcome == "SUCCEEDED":
-            raise ExecutionContractError("successful attempts cannot be resumed")
-        if terminal.run_id != resume.run_id:
-            raise ExecutionContractError("resume run_id differs from predecessor")
-        if artifact_sha256(terminal_raw) != resume.predecessor_terminal_sha256:
-            raise ExecutionContractError("resume predecessor terminal digest mismatch")
-        if terminal.latest_checkpoint_receipt_sha256 != resume.checkpoint_receipt_sha256:
-            raise ExecutionContractError("resume checkpoint does not match predecessor terminal")
-        created = cls.create(root, new_attempt)
+        checked_root = _attempt_root(root)
+        predecessor = _verify_attempt_chain(
+            checked_root,
+            resume.predecessor_attempt_id,
+        )
+        _validate_resume_source(resume, predecessor)
+        if (
+            new_attempt.plan_sha256 != predecessor.attempt.plan_sha256
+            or new_attempt.matrix_sha256 != predecessor.attempt.matrix_sha256
+            or new_attempt.training_config_sha256
+            != predecessor.attempt.training_config_sha256
+        ):
+            raise ExecutionContractError("resumed attempt changed a frozen plan binding")
+        created = cls.create(checked_root, new_attempt)
         _write_once(created.path / "resume.json", resume_raw)
-        return created
+        verified = _verify_attempt_chain(checked_root, new_attempt.attempt_id)
+        return cls(created.path, verified.attempt)
 
     @property
     def path(self) -> Path:
@@ -1064,7 +1243,8 @@ class AttemptStore:
         return self._attempt
 
     def _require_open(self) -> None:
-        if (self._path / "terminal.json").exists():
+        terminal_path = self._path / "terminal.json"
+        if terminal_path.exists() or terminal_path.is_symlink():
             raise ExecutionContractError("attempt is terminal and cannot be mutated")
 
     def write_heartbeat(self, record: object) -> str:
@@ -1161,33 +1341,232 @@ class SealedTestGate:
 
     @property
     def consumed(self) -> bool:
-        return (self._root / "sealed-test-consumption.json").exists()
+        path = self._root / "sealed-test-consumption.json"
+        return path.exists() or path.is_symlink()
+
+    @property
+    def evaluation_bound(self) -> bool:
+        path = self._root / "sealed-test-evaluation.json"
+        return path.exists() or path.is_symlink()
+
+    @staticmethod
+    def _consumption_bytes(
+        *,
+        external_grant_sha256: object,
+        test_manifest_sha256: object,
+        caption_manifest_sha256: object,
+        evaluator_sha256: object,
+        validation_freeze_sha256: object,
+        aggregate_code_sha256: object,
+        evaluation_census_sha256: object,
+        hard_gallery_freeze_binding_sha256: object,
+        hard_gallery_collection_sha256: object,
+        consumed_at_utc: object,
+    ) -> bytes:
+        return _canonical_json_bytes(
+            {
+                "aggregate_code_sha256": _sha256(
+                    aggregate_code_sha256, "aggregate_code_sha256"
+                ),
+                "authority": AUTHORITY,
+                "caption_manifest_sha256": _sha256(
+                    caption_manifest_sha256, "caption_manifest_sha256"
+                ),
+                "consumed_at_utc": _timestamp(consumed_at_utc, "consumed_at_utc"),
+                "evaluator_sha256": _sha256(evaluator_sha256, "evaluator_sha256"),
+                "external_grant_sha256": _sha256(
+                    external_grant_sha256, "external_grant_sha256"
+                ),
+                "external_receipt_verified": False,
+                "evaluation_census_sha256": _sha256(
+                    evaluation_census_sha256,
+                    "evaluation_census_sha256",
+                ),
+                "hard_gallery_collection_sha256": _sha256(
+                    hard_gallery_collection_sha256,
+                    "hard_gallery_collection_sha256",
+                ),
+                "hard_gallery_freeze_binding_sha256": _sha256(
+                    hard_gallery_freeze_binding_sha256,
+                    "hard_gallery_freeze_binding_sha256",
+                ),
+                "production": PRODUCTION,
+                "result_claimed": RESULT_CLAIMED,
+                "schema": SEALED_TEST_SCHEMA,
+                "status": "LOCAL_SINGLE_CONSUMPTION_ONLY_NOT_AN_AUTHORITY_GRANT",
+                "test_manifest_sha256": _sha256(
+                    test_manifest_sha256, "test_manifest_sha256"
+                ),
+                "validation_freeze_sha256": _sha256(
+                    validation_freeze_sha256, "validation_freeze_sha256"
+                ),
+            }
+        )
 
     def consume(
         self,
         *,
         external_grant_sha256: object,
         test_manifest_sha256: object,
+        caption_manifest_sha256: object,
         evaluator_sha256: object,
+        validation_freeze_sha256: object,
+        aggregate_code_sha256: object,
+        evaluation_census_sha256: object,
+        hard_gallery_freeze_binding_sha256: object,
+        hard_gallery_collection_sha256: object,
         consumed_at_utc: object,
     ) -> str:
         """Record one use; all inputs remain unverified external assertions."""
 
-        payload = {
-            "authority": AUTHORITY,
-            "consumed_at_utc": _timestamp(consumed_at_utc, "consumed_at_utc"),
-            "evaluator_sha256": _sha256(evaluator_sha256, "evaluator_sha256"),
-            "external_grant_sha256": _sha256(external_grant_sha256, "external_grant_sha256"),
-            "external_receipt_verified": False,
-            "production": PRODUCTION,
-            "result_claimed": RESULT_CLAIMED,
-            "schema": SEALED_TEST_SCHEMA,
-            "status": "LOCAL_SINGLE_CONSUMPTION_ONLY_NOT_AN_AUTHORITY_GRANT",
-            "test_manifest_sha256": _sha256(test_manifest_sha256, "test_manifest_sha256"),
-        }
-        raw = _canonical_json_bytes(payload)
+        raw = self._consumption_bytes(
+            external_grant_sha256=external_grant_sha256,
+            test_manifest_sha256=test_manifest_sha256,
+            caption_manifest_sha256=caption_manifest_sha256,
+            evaluator_sha256=evaluator_sha256,
+            validation_freeze_sha256=validation_freeze_sha256,
+            aggregate_code_sha256=aggregate_code_sha256,
+            evaluation_census_sha256=evaluation_census_sha256,
+            hard_gallery_freeze_binding_sha256=hard_gallery_freeze_binding_sha256,
+            hard_gallery_collection_sha256=hard_gallery_collection_sha256,
+            consumed_at_utc=consumed_at_utc,
+        )
         _write_once(self._root / "sealed-test-consumption.json", raw)
         return artifact_sha256(raw)
+
+    def verify_consumption(
+        self,
+        *,
+        external_grant_sha256: object,
+        test_manifest_sha256: object,
+        caption_manifest_sha256: object,
+        evaluator_sha256: object,
+        validation_freeze_sha256: object,
+        aggregate_code_sha256: object,
+        evaluation_census_sha256: object,
+        hard_gallery_freeze_binding_sha256: object,
+        hard_gallery_collection_sha256: object,
+        consumed_at_utc: object,
+    ) -> str:
+        expected = self._consumption_bytes(
+            external_grant_sha256=external_grant_sha256,
+            test_manifest_sha256=test_manifest_sha256,
+            caption_manifest_sha256=caption_manifest_sha256,
+            evaluator_sha256=evaluator_sha256,
+            validation_freeze_sha256=validation_freeze_sha256,
+            aggregate_code_sha256=aggregate_code_sha256,
+            evaluation_census_sha256=evaluation_census_sha256,
+            hard_gallery_freeze_binding_sha256=hard_gallery_freeze_binding_sha256,
+            hard_gallery_collection_sha256=hard_gallery_collection_sha256,
+            consumed_at_utc=consumed_at_utc,
+        )
+        observed = _read_regular(
+            self._root / "sealed-test-consumption.json",
+            "sealed-test consumption artifact",
+        )
+        if observed != expected:
+            raise ExecutionContractError(
+                "sealed-test consumption differs from authenticated authorization"
+            )
+        return artifact_sha256(observed)
+
+    def bind_evaluation(
+        self,
+        *,
+        consumption_sha256: object,
+        evaluation_aggregate_sha256: object,
+        evaluator_sha256: object,
+        aggregate_code_sha256: object,
+        completed_at_utc: object,
+    ) -> str:
+        consumption_raw = _read_regular(
+            self._root / "sealed-test-consumption.json",
+            "sealed-test consumption artifact",
+        )
+        checked_consumption = _sha256(
+            consumption_sha256, "sealed_test_consumption_sha256"
+        )
+        if artifact_sha256(consumption_raw) != checked_consumption:
+            raise ExecutionContractError("sealed-test evaluation consumption digest mismatch")
+        raw = _canonical_json_bytes(
+            {
+                "aggregate_code_sha256": _sha256(
+                    aggregate_code_sha256, "aggregate_code_sha256"
+                ),
+                "authority": AUTHORITY,
+                "completed_at_utc": _timestamp(completed_at_utc, "completed_at_utc"),
+                "evaluation_aggregate_sha256": _sha256(
+                    evaluation_aggregate_sha256,
+                    "evaluation_aggregate_sha256",
+                ),
+                "evaluator_sha256": _sha256(evaluator_sha256, "evaluator_sha256"),
+                "production": PRODUCTION,
+                "result_claimed": RESULT_CLAIMED,
+                "schema": SEALED_TEST_EVALUATION_SCHEMA,
+                "sealed_test_consumption_sha256": checked_consumption,
+                "status": "LOCAL_SEALED_TEST_EVALUATION_BOUND_NOT_EXTERNAL_AUTHORITY",
+            }
+        )
+        _write_once(self._root / "sealed-test-evaluation.json", raw)
+        return artifact_sha256(raw)
+
+    def verified_evaluation_binding(
+        self,
+        *,
+        consumption_sha256: object,
+        evaluator_sha256: object,
+        aggregate_code_sha256: object,
+    ) -> tuple[str, str]:
+        consumption_raw = _read_regular(
+            self._root / "sealed-test-consumption.json",
+            "sealed-test consumption artifact",
+        )
+        checked_consumption = _sha256(
+            consumption_sha256, "sealed_test_consumption_sha256"
+        )
+        if artifact_sha256(consumption_raw) != checked_consumption:
+            raise ExecutionContractError("sealed-test consumption digest mismatch")
+        raw = _read_regular(
+            self._root / "sealed-test-evaluation.json",
+            "sealed-test evaluation artifact",
+        )
+        value = _parse_canonical(raw, "sealed-test evaluation binding")
+        expected_keys = {
+            "aggregate_code_sha256",
+            "authority",
+            "completed_at_utc",
+            "evaluation_aggregate_sha256",
+            "evaluator_sha256",
+            "production",
+            "result_claimed",
+            "schema",
+            "sealed_test_consumption_sha256",
+            "status",
+        }
+        if set(value) != expected_keys:
+            raise ExecutionContractError("sealed-test evaluation binding keys are not closed")
+        _timestamp(value["completed_at_utc"], "completed_at_utc")
+        aggregate_sha256 = _sha256(
+            value["evaluation_aggregate_sha256"],
+            "evaluation_aggregate_sha256",
+        )
+        if (
+            value["aggregate_code_sha256"]
+            != _sha256(aggregate_code_sha256, "aggregate_code_sha256")
+            or value["evaluator_sha256"]
+            != _sha256(evaluator_sha256, "evaluator_sha256")
+            or value["sealed_test_consumption_sha256"] != checked_consumption
+            or value["authority"] != AUTHORITY
+            or value["production"] is not PRODUCTION
+            or value["result_claimed"] is not RESULT_CLAIMED
+            or value["schema"] != SEALED_TEST_EVALUATION_SCHEMA
+            or value["status"]
+            != "LOCAL_SEALED_TEST_EVALUATION_BOUND_NOT_EXTERNAL_AUTHORITY"
+        ):
+            raise ExecutionContractError("sealed-test evaluation binding is invalid")
+        if _canonical_json_bytes(value) != raw:
+            raise ExecutionContractError("sealed-test evaluation binding is not canonical")
+        return aggregate_sha256, artifact_sha256(raw)
 
 
 def _expected_training_config() -> dict[str, object]:
@@ -1408,7 +1787,7 @@ class DataFreeRunner:
             report = public_preflight(self._config)
             raise ExecutionHold(checked_command, report.hold_codes)
         admission = self._runtime_admission()
-        return CommandIntent(
+        intent = CommandIntent(
             command=checked_command,
             run_id=checked_run,
             seed=checked_seed,
@@ -1420,6 +1799,19 @@ class DataFreeRunner:
             execution_authorized=True,
             production=admission.production,
         )
+        if checked_command == "evaluate" and checked_split == "test":
+            consume = getattr(self._adapter, "consume_sealed_test", None)
+            if not callable(consume):
+                raise ExecutionContractError(
+                    "sealed-test evaluation requires an authenticated persistent gate"
+                )
+            consumption_sha256 = consume(intent)
+            _sha256(consumption_sha256, "sealed_test_consumption_sha256")
+            intent = replace(
+                intent,
+                sealed_test_consumption_sha256=consumption_sha256,
+            )
+        return intent
 
     def execute_command(
         self,
@@ -1450,6 +1842,8 @@ class DataFreeRunner:
             or result.admission_sha256 != intent.admission_sha256
             or result.authority != intent.authority
             or result.production is not intent.production
+            or result.sealed_test_consumption_sha256
+            != intent.sealed_test_consumption_sha256
         ):
             raise ExecutionContractError("command result is not bound to its admitted intent")
         return result
@@ -1510,4 +1904,5 @@ __all__ = [
     "runtime_admission_sha256",
     "runtime_handler_manifest_sha256",
     "validate_training_config_bytes",
+    "verified_resume_checkpoint_payload_sha256",
 ]

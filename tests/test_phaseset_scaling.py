@@ -1,9 +1,10 @@
 """High-coverage invariance and streaming-scaling tests for PhaseSet.
 
-The K<=27 cases exercise the real activity-to-token path.  The K=8..256
-stress test exercises the real edge iterator and relation algebra while
-replacing only the costly Morlet convolution with shape-correct cached
-responses.  It deliberately does not claim a K=256 neural forward pass.
+The K<=27 cases exercise the real activity-to-token path. The K=8..256 stress
+tests exercise the complete neural edge stream while replacing only the costly
+Morlet convolution with shape-correct cached responses. K=256 therefore passes
+through the real half-edge, pair, incident-moment, topology, and postprocess
+modules without constructing a dense actor-pair tensor.
 """
 
 from __future__ import annotations
@@ -333,6 +334,34 @@ def test_large_k_stream_is_complete_budgeted_and_never_allocates_k_by_k(
         len(shape) >= 2 and shape[0] == actor_count and shape[1] == actor_count
         for shape in observed_shapes
     ), observed_shapes
+
+
+@pytest.mark.parametrize("actor_count", (32, 128, 256))
+def test_large_k_complete_neural_forward_is_permutation_invariant(
+    actor_count: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache_calls = _install_synthetic_morlet_cache(monkeypatch)
+    model = _small_model()
+    expected_edges = actor_count * (actor_count - 1) // 2
+    original = _single_activity_batch(actor_count, domain=f"neural-{actor_count}")
+    permuted = _single_activity_batch(
+        actor_count,
+        domain=f"neural-{actor_count}",
+        physical_order=tuple(reversed(range(actor_count))),
+    )
+    with torch.no_grad():
+        baseline = model.forward_activity(
+            original,
+            edge_chunk_size=256,
+        )
+        reordered = model.forward_activity(
+            permuted,
+            edge_chunk_size=256,
+        )
+    _assert_output_equal(baseline, reordered)
+    assert int(baseline.valid_pair_count.max().item()) == expected_edges
+    assert cache_calls == [2]
 
 
 def test_torch_descriptor_seam_gradient_is_actor_permutation_equivariant() -> None:

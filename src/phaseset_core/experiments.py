@@ -96,7 +96,7 @@ class ExperimentPlan:
 
 @dataclass(frozen=True, slots=True)
 class BaseScore:
-    """One caller-frozen validation score bound to a base terminal digest."""
+    """One validation score bound to its terminal and selected checkpoint."""
 
     run_id: str
     bidirectional_r1_numerator: int
@@ -104,12 +104,19 @@ class BaseScore:
     parameter_count: int
     frozen_runtime_latency_ns: int
     terminal_sha256: str
+    selected_checkpoint_sha256: str
+    split: str
+    validation_manifest_sha256: str
+    query_census_sha256: str
+    evaluator_sha256: str
+    score_artifact_sha256: str
 
 
 @dataclass(frozen=True, slots=True)
 class BaseQualification:
     """Deterministic result of the frozen nine-run qualification rule."""
 
+    score_rows: tuple[BaseScore, ...]
     winner_system_id: str
     winner_system_name: str
     winner_parameter_count: int
@@ -117,9 +124,15 @@ class BaseQualification:
     system_mean_rows: tuple[tuple[str, int, int], ...]
     system_resource_rows: tuple[tuple[str, int, int], ...]
     completion_sha256s: tuple[str, ...]
+    selected_checkpoint_sha256s: tuple[str, ...]
     winner_terminal_sha256s: tuple[str, ...]
+    winner_checkpoint_sha256s: tuple[str, ...]
+    validation_manifest_sha256: str
+    query_census_sha256: str
+    evaluator_sha256: str
+    score_artifact_sha256s: tuple[str, ...]
     score_rows_sha256: str
-    schema: str = "phaseset-base-qualification-v1"
+    schema: str = "phaseset-base-qualification-v3"
     status: str = "WINNER_SELECTED_FROM_COMPLETE_NINE_ROWS"
     authority: int = AUTHORITY
     production: bool = PRODUCTION
@@ -192,7 +205,7 @@ def _matrix_payload() -> dict[str, object]:
             "tie_break_order": [
                 "higher_three_seed_mean",
                 "fewer_parameters",
-                "lower_frozen_runtime_latency_ns",
+                "lower_three_seed_median_frozen_runtime_latency_ns",
                 "smaller_base_system_id",
             ],
         },
@@ -327,7 +340,7 @@ def build_experiment_plan() -> ExperimentPlan:
             seed=parse_run_id(run_id)[1],
             depends_on_run_ids=all_base_ids,
             required_artifact_ids=(
-                "base-qualification-v1",
+                "base-qualification-v3",
                 f"qualified-base-checkpoint-v1/{parse_run_id(run_id)[1]}",
                 f"periodic-cache-v1/{parse_run_id(run_id)[1]}",
                 "prepared-data-manifest-v1",
@@ -405,7 +418,10 @@ def qualify_base(scores: object) -> BaseQualification:
 
     if type(scores) is not tuple:
         raise TypeError("scores must be an exact tuple")
-    by_run: dict[str, tuple[Fraction, int, int, str]] = {}
+    by_run: dict[
+        str,
+        tuple[Fraction, int, int, str, str, str, str, str, str],
+    ] = {}
     for ordinal, value in enumerate(scores):
         if type(value) is not BaseScore:
             raise TypeError(f"scores[{ordinal}] must be exact BaseScore")
@@ -430,17 +446,45 @@ def qualify_base(scores: object) -> BaseQualification:
         )
         if not Fraction(0, 1) <= score <= Fraction(1, 1):
             raise ExperimentContractError("base score must be in [0,1]")
+        if value.split != "validation":
+            raise ExperimentContractError("base qualification can use validation only")
         by_run[value.run_id] = (
             score,
             value.parameter_count,
             value.frozen_runtime_latency_ns,
             _lower_sha256(value.terminal_sha256, "terminal_sha256"),
+            _lower_sha256(
+                value.selected_checkpoint_sha256,
+                "selected_checkpoint_sha256",
+            ),
+            _lower_sha256(
+                value.validation_manifest_sha256,
+                "validation_manifest_sha256",
+            ),
+            _lower_sha256(value.query_census_sha256, "query_census_sha256"),
+            _lower_sha256(value.evaluator_sha256, "evaluator_sha256"),
+            _lower_sha256(value.score_artifact_sha256, "score_artifact_sha256"),
         )
     expected_ids = base_run_ids()
     if set(by_run) != set(expected_ids):
         raise ExperimentContractError("base qualification requires exactly all nine base rows")
     if len({by_run[run_id][3] for run_id in expected_ids}) != len(expected_ids):
         raise ExperimentContractError("base terminal receipts must be unique across nine rows")
+    if len({by_run[run_id][4] for run_id in expected_ids}) != len(expected_ids):
+        raise ExperimentContractError(
+            "base selected checkpoints must be unique across nine rows"
+        )
+    for index, label in (
+        (5, "validation manifest"),
+        (6, "query census"),
+        (7, "evaluator"),
+    ):
+        if len({by_run[run_id][index] for run_id in expected_ids}) != 1:
+            raise ExperimentContractError(
+                f"all base rows must share one frozen {label}"
+            )
+    if len({by_run[run_id][8] for run_id in expected_ids}) != len(expected_ids):
+        raise ExperimentContractError("base score artifacts must be unique across nine rows")
 
     by_system_seed = {
         (parse_run_id(run_id)[2], parse_run_id(run_id)[1]): by_run[run_id][0]
@@ -451,12 +495,13 @@ def qualify_base(scores: object) -> BaseQualification:
         rows = tuple(
             by_run[f"phaseset-run-v1/BASE_QUALIFICATION/{seed}/{system_id}"] for seed in SEEDS
         )
-        observed = {(row[1], row[2]) for row in rows}
-        if len(observed) != 1:
+        parameter_counts = {row[1] for row in rows}
+        if len(parameter_counts) != 1:
             raise ExperimentContractError(
-                "base parameter count and frozen latency must agree across seeds"
+                "base parameter count must agree across seeds"
             )
-        metadata[system_id] = next(iter(observed))
+        median_latency_ns = sorted(row[2] for row in rows)[len(rows) // 2]
+        metadata[system_id] = (next(iter(parameter_counts)), median_latency_ns)
     means = {
         system_id: sum(
             (by_system_seed[(system_id, seed)] for seed in SEEDS),
@@ -481,11 +526,35 @@ def qualify_base(scores: object) -> BaseQualification:
             "frozen_runtime_latency_ns": by_run[run_id][2],
             "parameter_count": by_run[run_id][1],
             "run_id": run_id,
+            "score_artifact_sha256": by_run[run_id][8],
+            "selected_checkpoint_sha256": by_run[run_id][4],
+            "split": "validation",
             "terminal_sha256": by_run[run_id][3],
+            "validation_manifest_sha256": by_run[run_id][5],
+            "query_census_sha256": by_run[run_id][6],
+            "evaluator_sha256": by_run[run_id][7],
         }
         for run_id in expected_ids
     ]
+    canonical_score_rows = tuple(
+        BaseScore(
+            run_id=run_id,
+            bidirectional_r1_numerator=by_run[run_id][0].numerator,
+            bidirectional_r1_denominator=by_run[run_id][0].denominator,
+            parameter_count=by_run[run_id][1],
+            frozen_runtime_latency_ns=by_run[run_id][2],
+            terminal_sha256=by_run[run_id][3],
+            selected_checkpoint_sha256=by_run[run_id][4],
+            split="validation",
+            validation_manifest_sha256=by_run[run_id][5],
+            query_census_sha256=by_run[run_id][6],
+            evaluator_sha256=by_run[run_id][7],
+            score_artifact_sha256=by_run[run_id][8],
+        )
+        for run_id in expected_ids
+    )
     return BaseQualification(
+        score_rows=canonical_score_rows,
         winner_system_id=winner,
         winner_system_name=dict(BASE_SYSTEMS)[winner],
         winner_parameter_count=metadata[winner][0],
@@ -499,18 +568,34 @@ def qualify_base(scores: object) -> BaseQualification:
             for system_id, _ in BASE_SYSTEMS
         ),
         completion_sha256s=tuple(by_run[run_id][3] for run_id in expected_ids),
+        selected_checkpoint_sha256s=tuple(by_run[run_id][4] for run_id in expected_ids),
         winner_terminal_sha256s=tuple(
             by_run[f"phaseset-run-v1/BASE_QUALIFICATION/{seed}/{winner}"][3] for seed in SEEDS
         ),
+        winner_checkpoint_sha256s=tuple(
+            by_run[f"phaseset-run-v1/BASE_QUALIFICATION/{seed}/{winner}"][4]
+            for seed in SEEDS
+        ),
+        validation_manifest_sha256=by_run[expected_ids[0]][5],
+        query_census_sha256=by_run[expected_ids[0]][6],
+        evaluator_sha256=by_run[expected_ids[0]][7],
+        score_artifact_sha256s=tuple(by_run[run_id][8] for run_id in expected_ids),
         score_rows_sha256=hashlib.sha256(_canonical_json_bytes(score_rows)).hexdigest(),
     )
 
 
-def canonical_base_qualification_bytes(value: object) -> bytes:
+def canonical_base_qualification_bytes(
+    value: object,
+    *,
+    expected_sha256: str | None = None,
+) -> bytes:
     if type(value) is not BaseQualification:
         raise TypeError("value must be exact BaseQualification")
+    if type(value.score_rows) is not tuple:
+        raise TypeError("qualification score_rows must be an exact tuple")
+    rebuilt = qualify_base(value.score_rows)
     if (
-        value.schema != "phaseset-base-qualification-v1"
+        value.schema != "phaseset-base-qualification-v3"
         or value.status != "WINNER_SELECTED_FROM_COMPLETE_NINE_ROWS"
         or value.authority != 0
         or value.production is not False
@@ -534,14 +619,45 @@ def canonical_base_qualification_bytes(value: object) -> bytes:
         raise ExperimentContractError("qualification winner latency is invalid")
     if type(value.completion_sha256s) is not tuple or len(value.completion_sha256s) != 9:
         raise ExperimentContractError("qualification must bind nine terminals")
+    if (
+        type(value.selected_checkpoint_sha256s) is not tuple
+        or len(value.selected_checkpoint_sha256s) != 9
+    ):
+        raise ExperimentContractError("qualification must bind nine selected checkpoints")
     if type(value.winner_terminal_sha256s) is not tuple or len(value.winner_terminal_sha256s) != 3:
         raise ExperimentContractError("qualification must bind three winner terminals")
+    if (
+        type(value.winner_checkpoint_sha256s) is not tuple
+        or len(value.winner_checkpoint_sha256s) != 3
+    ):
+        raise ExperimentContractError("qualification must bind three winner checkpoints")
+    for name in (
+        "validation_manifest_sha256",
+        "query_census_sha256",
+        "evaluator_sha256",
+    ):
+        _lower_sha256(getattr(value, name), name)
+    if (
+        type(value.score_artifact_sha256s) is not tuple
+        or len(value.score_artifact_sha256s) != 9
+    ):
+        raise ExperimentContractError("qualification must bind nine score artifacts")
+    for digest in value.score_artifact_sha256s:
+        _lower_sha256(digest, "score_artifact_sha256")
+    if len(set(value.score_artifact_sha256s)) != 9:
+        raise ExperimentContractError("qualification score artifacts must be unique")
     for digest in value.completion_sha256s:
         _lower_sha256(digest, "completion_sha256")
     if len(set(value.completion_sha256s)) != 9:
         raise ExperimentContractError("qualification terminals must be unique")
+    for digest in value.selected_checkpoint_sha256s:
+        _lower_sha256(digest, "selected_checkpoint_sha256")
+    if len(set(value.selected_checkpoint_sha256s)) != 9:
+        raise ExperimentContractError("qualification selected checkpoints must be unique")
     for digest in value.winner_terminal_sha256s:
         _lower_sha256(digest, "winner_terminal_sha256")
+    for digest in value.winner_checkpoint_sha256s:
+        _lower_sha256(digest, "winner_checkpoint_sha256")
     expected_winner_digests = tuple(
         value.completion_sha256s[
             base_run_ids().index(
@@ -553,6 +669,18 @@ def canonical_base_qualification_bytes(value: object) -> bytes:
     if value.winner_terminal_sha256s != expected_winner_digests:
         raise ExperimentContractError(
             "qualification winner terminals must match the ordered nine-row census"
+        )
+    expected_winner_checkpoints = tuple(
+        value.selected_checkpoint_sha256s[
+            base_run_ids().index(
+                f"phaseset-run-v1/BASE_QUALIFICATION/{seed}/{value.winner_system_id}"
+            )
+        ]
+        for seed in SEEDS
+    )
+    if value.winner_checkpoint_sha256s != expected_winner_checkpoints:
+        raise ExperimentContractError(
+            "qualification winner checkpoints must match the seed-ordered nine-row census"
         )
     if (
         type(value.system_mean_rows) is not tuple
@@ -607,14 +735,39 @@ def canonical_base_qualification_bytes(value: object) -> bytes:
     ):
         raise ExperimentContractError("qualification winner resources are inconsistent")
     _lower_sha256(value.score_rows_sha256, "score_rows_sha256")
-    return _canonical_json_bytes(
+    if rebuilt != value:
+        raise ExperimentContractError(
+            "qualification canonical nine-row evidence or derived fields changed"
+        )
+    raw = _canonical_json_bytes(
         {
             "authority": value.authority,
             "completion_sha256s": list(value.completion_sha256s),
             "production": value.production,
             "result_claimed": value.result_claimed,
             "schema": value.schema,
+            "evaluator_sha256": value.evaluator_sha256,
+            "query_census_sha256": value.query_census_sha256,
+            "score_rows": [
+                {
+                    "bidirectional_r1_denominator": row.bidirectional_r1_denominator,
+                    "bidirectional_r1_numerator": row.bidirectional_r1_numerator,
+                    "frozen_runtime_latency_ns": row.frozen_runtime_latency_ns,
+                    "parameter_count": row.parameter_count,
+                    "evaluator_sha256": row.evaluator_sha256,
+                    "query_census_sha256": row.query_census_sha256,
+                    "run_id": row.run_id,
+                    "score_artifact_sha256": row.score_artifact_sha256,
+                    "selected_checkpoint_sha256": row.selected_checkpoint_sha256,
+                    "split": row.split,
+                    "terminal_sha256": row.terminal_sha256,
+                    "validation_manifest_sha256": row.validation_manifest_sha256,
+                }
+                for row in value.score_rows
+            ],
             "score_rows_sha256": value.score_rows_sha256,
+            "score_artifact_sha256s": list(value.score_artifact_sha256s),
+            "selected_checkpoint_sha256s": list(value.selected_checkpoint_sha256s),
             "status": value.status,
             "system_mean_rows": [
                 {
@@ -636,9 +789,18 @@ def canonical_base_qualification_bytes(value: object) -> bytes:
             "winner_parameter_count": value.winner_parameter_count,
             "winner_system_id": value.winner_system_id,
             "winner_system_name": value.winner_system_name,
+            "winner_checkpoint_sha256s": list(value.winner_checkpoint_sha256s),
             "winner_terminal_sha256s": list(value.winner_terminal_sha256s),
+            "validation_manifest_sha256": value.validation_manifest_sha256,
         }
     )
+    if expected_sha256 is not None:
+        expected = _lower_sha256(expected_sha256, "expected qualification sha256")
+        if hashlib.sha256(raw).hexdigest() != expected:
+            raise ExperimentContractError(
+                "qualification bytes differ from the trusted expected digest"
+            )
+    return raw
 
 
 def validate_control_parameter_counts(counts: object) -> tuple[tuple[str, int], ...]:

@@ -366,3 +366,32 @@ def test_base_factory_and_fixed_social_depth_match_registered_specification() ->
     )
     assert type(social) is SocialTemporalBase
     assert len(social.layers) == 4
+
+
+def test_social_temporal_actor_attention_never_materializes_k_by_k(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actor_count = 65
+    observed: list[tuple[int, ...]] = []
+    original_matmul = torch.matmul
+
+    def tracked_matmul(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
+        result = original_matmul(left, right)
+        if result.ndim == 4 and result.shape[-1] == actor_count:
+            observed.append(tuple(int(axis) for axis in result.shape))
+        return result
+
+    monkeypatch.setattr(torch, "matmul", tracked_matmul)
+    torch.manual_seed(987)
+    model = SocialTemporalBase(
+        hidden_dim=8,
+        heads=2,
+        ffn_dim=16,
+        dropout=0.0,
+    ).eval()
+    with torch.no_grad():
+        output = model(_skeleton_batch(actor_count))
+    assert output.group_embedding.shape == (1, 8)
+    assert observed
+    assert max(shape[-2] for shape in observed) <= 64
+    assert not any(shape[-2:] == (actor_count, actor_count) for shape in observed)

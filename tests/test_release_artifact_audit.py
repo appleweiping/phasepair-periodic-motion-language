@@ -110,3 +110,33 @@ def test_zip_symlink_is_rejected(tmp_path: Path) -> None:
     rejected = _run(str(linked))
     assert rejected.returncode == 1
     assert "non-regular ZIP member" in rejected.stderr
+
+
+def test_directory_audit_is_fail_closed_and_can_bind_exact_asset_set(tmp_path: Path) -> None:
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "receipt.json").write_text('{"status":"safe"}\n', encoding="utf-8")
+    (assets / "notes.txt").write_text("public notes\n", encoding="utf-8")
+    (assets / "opaque.bin").write_bytes(b"silently skipped before hardening\n")
+
+    rejected_type = _run(str(assets))
+    assert rejected_type.returncode == 1
+    assert "unsupported release artifact type" in rejected_type.stderr
+
+    (assets / "opaque.bin").unlink()
+    rejected_set = _run(
+        "--expected-name",
+        "receipt.json",
+        str(assets),
+    )
+    assert rejected_set.returncode == 1
+    assert "release artifact set differs" in rejected_set.stderr
+
+    exact = _run(
+        "--expected-name",
+        "receipt.json",
+        "--expected-name",
+        "notes.txt",
+        str(assets),
+    )
+    assert exact.returncode == 0, exact.stdout + exact.stderr
