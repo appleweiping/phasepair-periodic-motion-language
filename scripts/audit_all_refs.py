@@ -156,4 +156,3 @@ if __name__ == "__main__":
     ) as exc:
         print(f"ALL_REFS_AUDIT_FAIL: {exc}")
         raise SystemExit(1) from exc
-

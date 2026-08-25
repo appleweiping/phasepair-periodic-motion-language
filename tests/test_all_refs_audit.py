@@ -57,4 +57,3 @@ def test_all_refs_audit_rejects_a_removed_historical_endpoint(tmp_path: Path) ->
     rejected = _run(checkout)
     assert rejected.returncode == 1
     assert "credential or endpoint pattern" in rejected.stdout + rejected.stderr
-
