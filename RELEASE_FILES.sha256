@@ -1,4 +1,5 @@
 # sha256\tbytes\tgit_index_path; self excluded
+ca4262d34e1553bf562d8ef5d3ef15b666b8f12214d5ff9345a8573baf9dd0f3	327	.gitattributes
 2c5a644e7b812eb516fedeee66218e87a3ee9a0e6206d0e37a383b24eb1f1522	129	.github/CODEOWNERS
 773999d89bee3827b1bb43279ce17225a78fcbd0402a57a6d663ae3d39a9af0f	2889	.github/workflows/ci.yml
 4bed921bd4f4cdd73c5533ccf30fd765c426da1835e397c7e7ec90ae6d5f9302	378	.gitignore
