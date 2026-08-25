@@ -51,9 +51,13 @@ tokenizer invocation. The public code fails closed on that boundary.
 
 ## Verification scope
 
-- CPython 3.14.5 public tree: `568 passed, 3 skipped, 36 subtests passed`.
-- CPython 3.12.0 public tree: `567 passed, 3 skipped, 1 deselected, 36 subtests
-  passed`; the deselection is the exact 3.14.5 signal-runtime identity test.
+- Windows x86-64, CPython 3.14.5 public tree: `568 passed, 3 skipped, 36
+  subtests passed`.
+- Windows x86-64, CPython 3.12.0 public tree: `567 passed, 3 skipped, 1
+  deselected, 36 subtests passed`; the deselection is the exact 3.14.5
+  signal-runtime identity test.
+- Ubuntu portability lane: public audit, checksum manifest, local links, Ruff,
+  and no-dependency wheel build; it does not qualify the fixed signal oracle.
 - Ruff: clean across `src`, `tests`, and `scripts`.
 - The no-result manuscript builds to four pages with BibTeX, no undefined
   citation/reference, and no overfull horizontal box.

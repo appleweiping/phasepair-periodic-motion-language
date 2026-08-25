@@ -18,8 +18,9 @@ has been issued.
   30-epoch sampler manifests, motion/caption training-batch cross-binding,
   full-gallery validation selection, base qualification, and statistical
   reporting primitives.
-- Python 3.12/3.14 CI, a fail-closed public-tree audit, and a deterministic
-  tracked-file checksum manifest.
+- Windows Python 3.12/3.14 exact-runtime CI, an Ubuntu portability audit/wheel
+  lane, a fail-closed public-tree audit, and a deterministic tracked-file
+  checksum manifest.
 - B0 annotation/caption technical closure receipts with the remaining human
   license/release decisions stated explicitly.
 - No-result paper source, editable method/protocol slide source, project status,

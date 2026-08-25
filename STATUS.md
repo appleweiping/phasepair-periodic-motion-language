@@ -39,8 +39,9 @@ training admission.
 
 | Scope | Result | Boundary |
 |---|---|---|
-| Public tree, CPython 3.14.5 | `568 passed, 3 skipped, 36 subtests passed`; Ruff clean | Synthetic/data-free behavior only. |
-| Public tree, CPython 3.12.0 | `567 passed, 3 skipped, 1 deselected, 36 subtests passed` | The deselected test intentionally asserts the exact 3.14.5 signal-oracle runtime. |
+| Public tree, Windows x86-64, CPython 3.14.5 | `568 passed, 3 skipped, 36 subtests passed`; Ruff clean | Synthetic/data-free behavior only. |
+| Public tree, Windows x86-64, CPython 3.12.0 | `567 passed, 3 skipped, 1 deselected, 36 subtests passed` | The deselected test intentionally asserts the exact 3.14.5 signal-oracle runtime. |
+| Ubuntu portability lane | Public audit, checksum manifest, links, Ruff, and wheel build | Does not qualify the Windows-pinned Morlet numerical oracle for Linux. |
 | Wider private engineering workspace | `679 passed, 22 skipped, 36 subtests passed`; Ruff clean | Includes non-public platform/process tests and is not a substitute for public-tree QA. |
 | Caption/training/sampler independent review | PASS on bare-CR rejection, receipt privacy, rebind/forgery rejection, ordinal binding, and cross-epoch/cross-seed replay rejection | Still authority zero; the real tokenizer adapter remains open. |
 
@@ -80,7 +81,8 @@ Neither mechanism certifies scientific correctness or third-party rights.
    execution adapter without weakening the fail-closed boundary.
 2. Close the remaining owner-license, topology-signature/transfer, and
    qualified-release decisions for the private dataset lineage.
-3. Establish the target-server CUDA/runtime receipt and compatible production
+3. Establish the target-server Linux/CUDA runtime receipt, including a
+   separately qualified signal-oracle identity, and compatible production
    environment.
 4. Execute the registered 9 base and 18 residual runs with complete receipts.
 5. Produce the 21-row validation matrix, paired bootstrap output, H1--H6

@@ -120,14 +120,17 @@ python -B -m pytest -p no:cacheprovider -q
 python -B -m ruff check --no-cache src tests
 ```
 
-The current public working tree was verified on 2026-08-25 with CPython 3.14.5:
+The current public working tree was verified on 2026-08-25 on Windows x86-64
+with CPython 3.14.5:
 `568 passed, 3 skipped, 36 subtests passed`, followed by a clean Ruff run. Its
 CPython 3.12 lane passed `567` tests with `3` platform/private-runtime skips and
 one deliberate deselection of the test that asserts the exact 3.14.5 signal
 oracle runtime. The wider private engineering workspace separately passed
 `679` tests with `22` documented platform/runtime skips and `36` subtests.
 These are scoped software checks; they neither authorize nor substitute for
-real training.
+real training. Ubuntu CI verifies the public tree, links, lint, manifest, and
+wheel build only; the fixed Morlet byte oracle has not yet been qualified for
+the target Linux server runtime.
 
 ## Public/private boundary
 
