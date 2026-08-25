@@ -1,10 +1,22 @@
 # Changelog
 
-All notable public changes to PhasePair are recorded here. The repository is
-still a research release candidate; no empirical result or final paper release
-has been issued.
+All notable public changes to PhaseSet and its PhasePair ancestor are recorded
+here. The repository is still a research release candidate; no empirical
+result or final paper release has been issued.
 
 ## Unreleased
+
+### PhaseSet migration
+
+- Renamed the active project from dyadic PhasePair to multi-person PhaseSet
+  while preserving the immutable PhasePair `v0.1.0` tag and namespace.
+- Added the `phaseset-core` distribution metadata, `phaseset_core` namespace,
+  migration boundary, contribution policy, security policy, and ownership
+  rules.
+- Replaced the old two-person scientific target with a dynamically padded,
+  permutation-invariant, streamed `O(K^2)` group relation contract.
+- Registered a true `K>=3` Embody 3D protocol, 33-run experiment census,
+  fail-closed runner surface, and no-result ICASSP manuscript path.
 
 ### Added
 
@@ -13,7 +25,7 @@ has been issued.
 - Stopped authority-zero CLIP resolution/text-runtime bridge with public-safe
   offline runtime receipts; no model weights are redistributed.
 - Data-free trainer transaction, checkpoint lifecycle, and deterministic
-  9-base-plus-18-residual job-plan primitives.
+  9-base-plus-24-residual job-plan primitives.
 - Registered residual heads, strict three-caption processing, complete
   30-epoch sampler manifests, motion/caption training-batch cross-binding,
   full-gallery validation selection, base qualification, and statistical
@@ -33,9 +45,9 @@ has been issued.
 ### Pending
 
 - Production original-caption-to-tokenizer execution-adapter qualification.
-- Target-server runtime qualification and the registered 9 + 18 experiments.
-- Registered statistics, empirical figures, final ICASSP manuscript/PDF, and
-  final tagged GitHub release with anonymous-clone verification.
+- Target-server runtime qualification and the registered 9 + 24 experiments.
+- Real-data aggregate statistics, empirical table cells, final ICASSP author-kit
+  validation, and the `v1.0.0` GitHub release with anonymous-clone verification.
 
 ### Release boundary
 

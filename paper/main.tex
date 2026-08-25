@@ -1,136 +1,392 @@
 % DRAFT / AUTHORITY0 / NO_RESULT / NOT_FOR_SUBMISSION
-% This is a content skeleton, not an IEEE/ICASSP-template-bound manuscript.
+% Engineering article template retained because no usable official conference
+% paper kit is available in the repository. Re-template before submission.
+\pdfminorversion=7
 \documentclass[10pt,twocolumn]{article}
-\usepackage[letterpaper,margin=0.66in,columnsep=0.22in]{geometry}
-\usepackage{amsmath,amssymb,booktabs,array,microtype,xcolor}
+\usepackage[letterpaper,margin=0.58in,columnsep=0.21in]{geometry}
+\usepackage{amsmath,amssymb,booktabs,array,balance,graphicx,microtype,xcolor}
 \usepackage[T1]{fontenc}
 \usepackage{lmodern}
 \usepackage[hidelinks]{hyperref}
 
-\definecolor{holdred}{RGB}{165,24,24}
+\definecolor{holdred}{RGB}{160,22,22}
 \newcommand{\DraftState}{\textcolor{holdred}{\textbf{DRAFT / AUTHORITY0 / NO\_RESULT / NOT\_FOR\_SUBMISSION}}}
-\newcommand{\ResultHold}{\textcolor{holdred}{\texttt{HOLD--NOT\_RUN}}}
-\newcommand{\BibHold}{\textcolor{holdred}{\texttt{BIB\_METADATA\_HOLD}}}
+\newcommand{\ResultHold}{\textcolor{holdred}{\textsf{HOLD}}}
+\newcommand{\K}{K}
+\setlength{\parindent}{0.9em}
+\setlength{\parskip}{0pt}
+\setlength{\textfloatsep}{5pt plus 1pt minus 2pt}
+\setlength{\floatsep}{4pt plus 1pt minus 1pt}
+\setlength{\intextsep}{4pt plus 1pt minus 1pt}
+\setlength{\abovedisplayskip}{4pt plus 1pt minus 2pt}
+\setlength{\belowdisplayskip}{4pt plus 1pt minus 2pt}
+\setlength{\abovecaptionskip}{2pt}
+\setlength{\belowcaptionskip}{0pt}
+\renewcommand{\arraystretch}{0.92}
+\raggedbottom
 
-\title{PhasePair: Score-Symmetric Dyadic Timing Residuals\\for Motion--Language Retrieval}
-\author{Anonymous Authors\\\DraftState}
+\title{\vspace{-1.5em}PhaseSet: Permutation-Invariant Periodic Relation Tokens\\
+for Multi-Person Motion--Language Retrieval}
+\author{Anonymous Authors\\[-1pt]\small\DraftState}
 \date{}
 
 \begin{document}
 \maketitle
+\vspace{-1.4em}
 \begin{center}
-\fbox{\parbox{0.94\linewidth}{\centering\DraftState\\
-No private data, model runtime, training run, score, statistical result, or submission authority is represented by this manuscript.}}
+\fbox{\parbox{0.93\linewidth}{\centering\small
+This manuscript registers a method and evaluation protocol only. No training run,
+test score, confidence interval, or submission authority is represented.}}
 \end{center}
+\vspace{-0.55em}
 
 \begin{abstract}
-Dyadic motion descriptions can share coarse interaction semantics while differing in synchronization and relative timing. We study a deliberately narrow question: whether fixed, motion-derived complex relation evidence adds repeatable bidirectional retrieval utility to a qualified interaction-aware motion--language encoder. PhasePair pools six fixed Morlet bands over paired kinematic activity, forms ordered relation tokens, and adds a score-symmetric residual to a frozen MIME-style base. The registered comparison includes capacity-, marginal-frequency-, mean/difference-DCT-, relation-, and phase-family controls under matched residual-head capacity. This document specifies the method and sealed evaluation plan only. All empirical cells remain held because rights, assets, CLIP/runtime resolution, optimization, training, and test authority are absent.
+Group motions can share actor marginals and the same multiset of pair relations
+while differing in which relations meet at each actor. We register PhaseSet, a
+permutation-invariant residual for bidirectional multi-person motion--language
+retrieval. Six fixed Morlet bands produce directed pair descriptors; symmetric
+pair statistics and actor--relation incidence moments yield six group tokens.
+The topology branch is exactly zero at two actors, and all edges are processed
+with deterministic streamed reductions. The confirmatory protocol fixes a
+572-capture Embody 3D eligibility census, a participant-component-disjoint
+400/96/76 split, unseen-cardinality $K{=}3$ testing, 33 training attempts,
+eight hypotheses, one sealed test, and 100,000 clustered bootstrap draws. This
+is a \textbf{NO\_RESULT} technical draft: every empirical cell is held.
 \end{abstract}
 
-\section{Introduction}
-Two-person actions such as coordinated exercise, dancing, or sparring can be textually similar even when their temporal relationship differs. A global interaction embedding may therefore align the action category while underrepresenting whether the actors move together, oppose one another, or exhibit a consistent relative phase. Existing work already occupies broad claims about interaction-aware motion--language encoding, frequency representations, and cross-wavelet analysis \cite{mime2026,interedit2026_hold,wamo2025_hold,grinsted2004,toiviainen2021}. Our claim boundary is consequently narrow: PhasePair is not a new motion backbone, not local cross-wavelet coherence, not causal lead--lag inference, and not an official reproduction of any baseline.
+\section{Problem and claim boundary}
+Single-person retrieval already includes contrastive motion synthesis and
+fine-grained wavelet encoders \cite{tmr2023,wamo2026}. Dyadic motion work covers
+interaction-aware retrieval and frequency-guided editing
+\cite{mime2026,interedit2026}. Multi-person language systems cover open-domain
+generation and instruction-based understanding
+\cite{multimotion2024,socialgen2025,llammo2026}. Periodic video-language
+reasoning also appears in action counting \cite{countllm2025}. Consequently,
+PhaseSet makes no broad ``first'' claim for motion--language, frequency-aware
+retrieval, or multi-human understanding.
 
-We register one falsifiable contribution: a six-token, fixed-kinematic complex-relation residual whose final motion--text score is invariant to actor order by construction. The residual must improve over a strength-qualified in-house MIME adaptation and five matched controls. Until the complete experiment and authority chain closes, this contribution remains a hypothesis rather than a result.
+The sole registered question is narrower: \emph{does frequency-specific
+actor--relation incidence structure add retrieval utility beyond a qualified
+group encoder and seven matched structural controls?} The contribution is a
+fixed specification plus a fail-closed experiment. It is not generation,
+editing, causal phase inference, role recognition, or an official
+reimplementation of another model. Language supplies semantic retrieval tokens
+but cannot generate, select, edit, or supervise physical phase, lag, power, or
+coherence fields.
 
-\section{Related Work and Claim Boundary}
-MIME provides the mandatory interaction-aware reference point; the locally captured primary record identifies \emph{MIME: Multimodal Interactive Motion Encoder}, arXiv:2607.22702v1, but no official public code or checkpoint was evidenced at capture time \cite{mime2026}. InterEdit-style mean/difference DCT energy and WaMo-style marginal wavelets motivate separate non-complex controls, not a joint surrogate \cite{interedit2026_hold,wamo2025_hold}. Cross-wavelet and movement-interaction analyses predate this work \cite{grinsted2004,toiviainen2021}; we therefore use the narrower term ``Morlet-derived pooled cross-spectrum and coherence-like normalization.''
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.95\textwidth]{../figures/phaseset_motivation.pdf}
+\caption{Conceptual counterexample (not data or a result). Actor marginals and
+the pair-token multiset are identical, so pair-bag averaging cannot distinguish
+the groups; incident relation moments retain their different ownership.}
+\label{fig:motivation}
+\end{figure*}
 
-Structured relation alignment, interactive motion--language modeling, phase-aware retrieval, symmetry, and retrieval-benchmark concerns further close broad novelty claims \cite{sgar2025_hold,molam2025_hold,kinmo2025_hold,phasor2026_hold,intergen2024_hold,rig_hold,mrbench2026_hold}. Several of these records lack complete locally verified bibliographic metadata and are explicitly marked \BibHold{} in the bibliography. They must be replaced by independently verified records before submission.
+\section{Related evidence}
+Embody 3D provides synchronized multi-person motion, audio, and text at a
+larger official scale than the eligibility subset used here
+\cite{embody3d2025}. Multi-TPC offers natural triadic conversation, whereas
+M3Act3D offers synthetic large-$K$ group activity; we reserve them for
+cross-domain and engineering probes, respectively
+\cite{multitpc2026,m3act2024}. Neither is confirmatory evidence for the present
+retrieval claim. SocialGen/SocialX and Multi-Motion support variable-person
+modeling, but their autoregressive/generative tasks and constructed data do not
+replace native full-gallery retrieval \cite{socialgen2025,multimotion2024}.
 
-\section{Method}
-\subsection{Qualified base and score-symmetric residual}
-Under the registered method, the audited common adapter would produce ordered AB and BA motion passes for each actor pair. A future paper-audited, full-gallery-strength-qualified in-house MIME adaptation would supply frozen ordered motion embeddings and text embeddings; no such qualified runtime artifact exists at this draft state. It would not be described as an official MIME reproduction. Let the ordered global scores be dot products between normalized motion and text embeddings, and let an ordered residual head score six relation tokens. The only permitted final scoring rule is
+The five supplied reference papers further delimit the task. MotionMaster is
+single-person generation/editing; LangPose uses language as a pose-lifting
+pretraining prior; HMVLM is a single-person multi-task language model; and
+Pose2Lang3D distills 3D cues into static 2D-pose VQA
+\cite{motionmaster2026,langpose2026,hmvlm2025,pose2lang3d2026}. They motivate
+lineage, masking, task-interference, and privileged-information audits, not a
+PhaseSet result. Cross-wavelet analysis itself is longstanding
+\cite{grinsted2004}; our fixed descriptors are pooled motion features, not
+novel signal-processing estimators.
+
+\section{PhaseSet}
+\subsection{Input and deterministic periodic relations}
+An input is a dynamically padded tensor of $K\!\geq\!2$ actors, 200 frames,
+and 22 body joints, with actor/joint/frame masks. A shared 512D actor encoder
+uses no actor ID. Motion is resampled to 20 Hz; an independently hashed 20-Hz
+Morlet bank retains PhasePair's six physical center frequencies while its
+legacy 30-Hz tap bytes remain unchanged. Each response is computed once per actor. For every
+valid unordered pair $\{i,j\}$ and band $b$, the inherited directed 13D
+descriptor $d_b(i{\to}j)$ contains log auto-powers for the ordered endpoints,
+coherence-like magnitude, cosine/sine of principal relative phase, wrapped
+delay, a signed-phase-valid bit, and a six-way band indicator. These are
+motion-derived descriptors, not causal or physical measurements.
+
+All pairs are visited lexicographically in canonical 64-edge microblocks. The
+implementation allocates no tensor with two actor axes. Pair processing is
+$O(K^2)$ but streamed; if all exact edges exceed the frozen resource envelope,
+the API returns \texttt{RESOURCE\_LIMIT} instead of dropping actors or sampling
+edges.
+
+\subsection{Pair and incidence paths}
+A shared half-edge network and a symmetric pair network compute
 \begin{equation}
-\label{eq:score}
-\begin{aligned}
-G_{ij}&=\tfrac12\!\left(\langle g_i^{AB},t_j\rangle+\langle g_i^{BA},t_j\rangle\right),\\
-R_{ij}&=\tfrac12\!\left(r_{ij}^{AB}+r_{ij}^{BA}\right),\\
-S_{ij}&=\exp\!\bigl(\operatorname{clamp}(\ell_{\mathrm{MIME}},\log 1,\log 100)\bigr)
-          \left(G_{ij}+0.2R_{ij}\right).
-\end{aligned}
+\begin{split}
+u_{ij}^{b}&=H(d_b(i{\to}j)),\quad u_{ji}^{b}=H(d_b(j{\to}i)),\\
+p_{ij}^{b}&=P\!\left(u_{ij}^{b}+u_{ji}^{b},
+ |u_{ij}^{b}-u_{ji}^{b}|,u_{ij}^{b}\odot u_{ji}^{b}\right).
+\end{split}
+\label{eq:pair}
 \end{equation}
-The AB/BA average makes the score actor-swap invariant; it does not assert encoder equivariance. If all active relation masks are zero, the residual is defined as exactly zero and the score falls back to the same frozen base.
+Ordered concatenation is prohibited. The pair component $\bar p_b$ is the
+canonical masked mean over $p_{ij}^{b}$. For actor $i$, incident half-edges
+produce mean offset from the band-global mean, population second central
+moment $M2$, coverage $\deg(i)/(K-1)$, and missingness. The topology NodeMLP
+input is exactly $[\Delta\mathrm{mean},M2,\mathrm{coverage},\mathrm{missing}]$.
+A node is valid only at degree at least two; the post-MLP hard gate has no
+biased layer after it. Thus at $K{=}2$ the topology residual and its parameter
+gradients are exact positive zero.
 
-\subsection{Six-band relation tokens}
-Five fixed body-group activity channels would be computed from pre-normalization kinematic positions and velocities. Six fixed complex Morlet sliding-window dots use center frequencies 0.75, 1.125, 1.6875, 2.53125, 3.796875, and 5.6953125 Hz, with three-cycle lengths 120, 80, 54, 36, 24, and 16 frames at 30 Hz. No padding, kernel reversal, or kernel conjugation is allowed. Within each band, same-name body groups would be pooled into two auto spectra and one cross spectrum; the latter defines a coherence-like magnitude, principal relative phase, and a wrapped phase-delay proxy. These are motion-derived descriptors, not physical or causal measurements.
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.96\textwidth]{../figures/phaseset_architecture.pdf}
+\caption{Registered architecture (conceptual, no-result). Directed relations
+feed a symmetric pair mean and incident-moment topology path; a hard $K{=}2$
+gate preserves dyadic equivalence. Six motion tokens align with six semantic
+text-band tokens on top of the frozen qualified base score.}
+\label{fig:architecture}
+\end{figure*}
 
-For band index $k\in\{1,\ldots,6\}$, the ordered 13-dimensional token and its fixed fields are
+Let $q_b$ be the canonical masked mean of valid node outputs. The band token is
 \begin{equation}
+g_b=m_b\,C\!\left(\bar p_b+\tanh(\lambda_b)q_b\right),
 \label{eq:token}
-\begin{aligned}
-S_{AB,k}&=\operatorname*{mean}_{c,t}\overline{U_{A,k,c}[t]}U_{B,k,c}[t],\\
-\gamma_k^2&=\frac{|S_{AB,k}|^2}{(S_{AA,k}+10^{-12})(S_{BB,k}+10^{-12})},\\
-\phi_k&=\operatorname{Arg}(S_{AB,k}),\qquad
-\delta_k=-\frac{\phi_k}{2\pi f_k},\\
-\mathbf r_{AB,k}&=\bigl[\log(S_{AA,k}+10^{-12}),\\[-2pt]
-&\qquad \log(S_{BB,k}+10^{-12}),\gamma_k^2,\\[-2pt]
-&\qquad \cos\phi_k,\sin\phi_k,2f_k\delta_k,v_k,\\[-2pt]
-&\qquad \operatorname{onehot}_6(k)\bigr]\in\mathbb R^{13}.
-\end{aligned}
 \end{equation}
-Here $v_k$ is the signed-phase-valid bit. Swapping actors exchanges the auto spectra, preserves $\gamma_k^2$ and cosine, and changes the signs of sine and wrapped delay. Each token passes through the shared $13\!\rightarrow\!256\!\rightarrow\!512$ Linear--GELU--Dropout--Linear projector. Ordered projected-token similarities $d_{ijk}$ are pooled by the registered mask-aware rule $a_{ijk}=m_{ik}\exp(4d_{ijk})/\sum_l m_{il}\exp(4d_{ijl})$ and $r_{ij}^{\mathrm{ord}}=\sum_k a_{ijk}d_{ijk}$, with an exact zero residual when all slots are masked. Only the aggregated $R_{ij}$ in Eq.~\ref{eq:score} receives the fixed score-level coefficient 0.2; there is no learned filter, auxiliary phase loss, or delay loss.
+where $m_b$ is the band-valid mask and $C_b$ is the common postprocessor. The
+capacity-matched pair-only control passes exact positive zero for $q_b$ through
+the same $C_b$. Fixed-tree float64 microblock reduction, compensated
+microblock accumulation, and fixed-order Chan merges make the output invariant
+to registered chunk sizes.
 
-\begin{figure}[t]
-\centering
-\fbox{\parbox[c][1.18in][c]{0.94\columnwidth}{\centering
-\textbf{REPLACEABLE EDITABLE METHOD-FIGURE PLACEHOLDER}\\[3pt]
-common paired motion $\rightarrow$ frozen MIME AB/BA base\\
-fixed kinematic branch $\rightarrow$ six relation tokens\\
-shared projector $\rightarrow$ score-symmetric residual\\[3pt]
-Source deck: \footnotesize\nolinkurl{slides/PHASEPAIR_EDITABLE_PAPER_FIGURES_DATA_FREE_DRAFT.pptx}}}
-\caption{Method diagram placeholder. The cited repository PPTX contains only editable, no-result conceptual and protocol graphics. No third-party or private image is embedded here.}
-\label{fig:method}
-\end{figure}
-
-\subsection{Training objective}
-Batches are formed by motion/source cluster, and every official caption associated with the same motion cluster is a positive. The frozen base and each residual head share the same positive mask. The sole residual-training objective is symmetric multi-positive InfoNCE:
+\subsection{Text alignment and objective}
+CLIP's frozen text encoder supplies an embedding \cite{clip2021}. A shared
+TextBandMLP and learned band ID yield text tokens $\ell_b$. For capture $x$ and text $y$,
 \begin{equation}
-\label{eq:loss}
-\begin{aligned}
-\mathcal L_{m2t}&=-\frac1I\sum_i\left[\operatorname{LSE}_{j:P_{ij}=1}S_{ij}-\operatorname{LSE}_{j}S_{ij}\right],\\
-\mathcal L_{t2m}&=-\frac1J\sum_j\left[\operatorname{LSE}_{i:P_{ij}=1}S_{ij}-\operatorname{LSE}_{i}S_{ij}\right],\\
-\mathcal L&=\tfrac12\left(\mathcal L_{m2t}+\mathcal L_{t2m}\right).
-\end{aligned}
+S(x,y)=S_{\mathrm{base}}(x,y)+\tanh(\alpha)
+\frac{\sum_b m_b\cos(g_b,\ell_b)}{\sum_b m_b}.
+\label{eq:score}
 \end{equation}
-Masked, max-shifted log-sum-exp is required. There is no swap or known-delay auxiliary objective; swap symmetry follows from Eq.~\ref{eq:score}, while known-delay behavior is only a data-free numerical diagnostic.
+The externally supplied base scores are frozen. Variable-positive symmetric
+InfoNCE treats every registered caption for one capture as positive; windows or
+captions never become independent statistical units.
 
-\section{Registered Experiment Protocol}
-The census is fixed before any score exists. The seven systems are 00 MIME, 01 generic six-slot residual, 02 WaMo-style marginal-wavelet residual, 03 InterEdit-style mean/difference-DCT residual, 04 no-relation deletion, 05 phase-stripped deletion, and 06 PhasePair full. Seeds are 1729, 2718, and 31415, giving 21 score rows. Systems 01--06 require 18 residual-head runs. Before them, nine full base-qualification runs compare MIME, TMR-style early fusion, and TMR-style late fusion across the same three seeds, data, captions, crop, text initialization, objective, optimizer, 30 epochs, full validation gallery, and evaluator.
+\section{Frozen data protocol}
+The primary source is native multi-person Embody 3D, subject to its access and
+non-redistribution terms \cite{embody3d2025}. The project-registered,
+public-safe eligibility census has 572 captures, 69 participants, 20.673 scene
+hours, and 16 participant co-occurrence components: 27 captures have $K{=}3$
+and 545 have $K{=}4$. The split is 400 train / 96 validation / 76 test captures
+and 48/10/11 participants, with neither participant nor capture overlap.
+Crucially, \emph{all} 27 $K{=}3$ captures are in test; $K{=}3$ is therefore an
+unseen-participant and unseen-cardinality slice. We must not imply that
+training saw $K{=}3$.
 
-The primary full-gallery endpoint is the equal-weight average of T2M cluster-macro R@1 and M2T any-caption R@1. H1 compares full with MIME; H2 with generic; H3 with WaMo-style marginal wavelets; H4 with InterEdit-style mean/difference DCT; H5 with no relation; and H6 with phase stripped. H2--H6 form the five-comparison Holm family. All six hypotheses require the registered deterministic effect, direction, and seed-stability gates before inference. Confirmatory inference is restricted to a one-shot sealed test using 100,000 shared source-cluster bootstrap draws; no score exists in this draft. Validation is development-only and cannot support a paper claim.
+Motion uses 22 SMPL-X body joints, antialiased 30-to-20 fps resampling, and
+nonoverlapping 10 s (200-frame) windows. The common origin is the first valid
+frame's all-group pelvis centroid; centering/orienting around an indexed actor
+is forbidden. Whole-group yaw augmentation preserves relations. Gaps up to
+0.25 s may be interpolated while retaining the missing mask; a window is
+rejected if any actor is below 95\% valid or has a longer gap. Coherence never
+deletes an edge.
 
-\begin{table*}[t]
+Primary test queries are human holistic capture descriptions. Every valid
+nonoverlapping window is encoded and pooled by a fixed masked mean. Captures
+without holistic text are removed before scoring, never reassigned. A separate
+10 s auxiliary task may use machine-fused actor descriptions, visibly labeled
+as such; the fusion model is barred from skeletons, spectra, phase, model
+outputs, and split statistics.
+
+\section{Registered experiments: all results held}
+The base candidates are ActorMean (B0), SetPMA (B1), and SocialTemporal (B2).
+Each uses 512D states, eight heads, a 2048D FFN, dropout 0.1, and seeds 1729,
+2718, and 31415: nine qualification attempts. The winner is chosen only by
+three-seed mean validation bidirectional R@1, with ties resolved by fewer
+parameters, lower frozen-runtime latency, then smaller ID. Its seed-specific
+checkpoints are frozen and shared across residual systems.
+
+B0 applies one shared temporal actor tower and a masked actor mean. B1 replaces
+that mean with permutation-invariant pooling by multihead attention (PMA). B2
+uses four alternating blocks: temporal self-attention is applied independently
+with shared weights, then each frame performs set attention across the valid
+actors, followed by PMA. No candidate receives an actor index, actor-specific
+tower, or actor-0 reference. The architecture decision uses the three-seed
+validation mean, not per-seed winners; an exact tie is resolved only by the
+registered resource order. Thus every residual system for a seed reads the
+same immutable winning-base checkpoint and cache.
+
+Systems 01--08 each run at the same three seeds (24 more attempts), for a
+formal total of \textbf{33 training attempts}. Bases use the registered AdamW
+schedule (learning rate $2\!\times\!10^{-4}$, 30 epochs); residuals use
+$3\!\times\!10^{-4}$ and 20 epochs. Comparable systems share precision, batch,
+data, captions, and checkpoint rules and remain within $\pm1\%$ of full
+trainable parameters.
+
+The effective global batch is 128 windows under an edge-count budget, using
+gradient accumulation when cardinality reduces the microbatch. Both schedules
+use AdamW, weight decay 0.01, 5\% linear warmup then cosine decay, and unit
+gradient clipping. FP32 is the default. BF16 is admitted only after the target
+GPU passes the frozen numerical suite, and one precision is shared by all
+comparators. Checkpoint selection reads only the fixed validation endpoint;
+test access cannot change an epoch, prompt, cache, or system definition.
+
+\subsection{Capacity-matched structural controls}
+The controls separate token capacity, marginal periodicity, spectral content,
+pair aggregation, missingness, incidence ownership, and signed phase. Generic
+six-token residuals (01) have no motion-derived periodic field. Marginal power
+(02) removes cross-person relations; mean/difference DCT (03) supplies a
+non-phase spectral control. Pair-bag (04) retains every symmetric pair token
+but discards edge ownership. Coverage-only (05) receives coverage and
+missingness without half-edge content. Incidence-shuffled (06) preserves the
+half-edge multiset, degree, and coverage while reassigning edges to actors.
+Phase-stripped full (07) preserves energy and coherence but removes signed
+phase and lag. Only full PhaseSet (08) retains both pair content and true
+incidence. Controls share the same postprocessor and, where possible, the same
+head with inputs disabled rather than a separate lower-capacity network.
+
+\subsection{Execution and scaling gates}
+The runtime computes one Morlet response per actor and band, then checkpoints
+edge chunks so backward recomputes rather than stores all pair activations.
+The live footprint is $O(KD+E_cD)$ for chunk size $E_c$, while exact work is
+$O(K^2)$. Batches are bucketed by $\sum_b \binom{K_b}{2}$. Canonical private
+commitments determine reduction order but never enter the neural network.
+Permutation, padding, mixed-batch, endpoint-swap, chunk, and differentiable
+descriptor-seam gradient-equivariance tests are mandatory before real data. Stress cases at
+$K\in\{8,32,128,256\}$ must show no allocation with two actor axes; an
+insufficient edge budget yields an explicit resource failure rather than a
+different graph.
+
+\clearpage
+
+\twocolumn[{%
+\begin{minipage}{\textwidth}
+\begin{minipage}[t]{0.475\textwidth}
 \centering
-\caption{Registered full-gallery score matrix. Every one of the 21 seed cells is deliberately held. The macro makes absence conspicuous and must not be replaced before sealed result authorization.}
-\label{tab:results}
+\refstepcounter{table}
+\textbf{Table \thetable:} Frozen full-gallery matrix; every result is
+\ResultHold.\label{tab:hold}\\[2pt]
 \scriptsize
-\setlength{\tabcolsep}{2.4pt}
-\begin{tabular}{@{}lcccc@{}}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{@{}clcccc@{}}
 \toprule
-System & 1729 & 2718 & 31415 & Aggregate \\
+ID & System & 1729 & 2718 & 31415 & Aggregate \\
 \midrule
-00 MIME & \ResultHold & \ResultHold & \ResultHold & \ResultHold \\
-01 Generic & \ResultHold & \ResultHold & \ResultHold & \ResultHold \\
-02 WaMo-style & \ResultHold & \ResultHold & \ResultHold & \ResultHold \\
-03 InterEdit-style & \ResultHold & \ResultHold & \ResultHold & \ResultHold \\
-04 No relation & \ResultHold & \ResultHold & \ResultHold & \ResultHold \\
-05 Phase stripped & \ResultHold & \ResultHold & \ResultHold & \ResultHold \\
-06 PhasePair full & \ResultHold & \ResultHold & \ResultHold & \ResultHold \\
+00 & Qualified group base       & \ResultHold & \ResultHold & \ResultHold & \ResultHold \\
+01 & Generic six tokens         & \ResultHold & \ResultHold & \ResultHold & \ResultHold \\
+02 & Marginal Morlet power      & \ResultHold & \ResultHold & \ResultHold & \ResultHold \\
+03 & Mean/difference DCT        & \ResultHold & \ResultHold & \ResultHold & \ResultHold \\
+04 & PhasePair pair-bag         & \ResultHold & \ResultHold & \ResultHold & \ResultHold \\
+05 & Coverage/missing-only      & \ResultHold & \ResultHold & \ResultHold & \ResultHold \\
+06 & Incidence-shuffled         & \ResultHold & \ResultHold & \ResultHold & \ResultHold \\
+07 & Phase-stripped full        & \ResultHold & \ResultHold & \ResultHold & \ResultHold \\
+08 & PhaseSet full              & \ResultHold & \ResultHold & \ResultHold & \ResultHold \\
 \bottomrule
 \end{tabular}
-\end{table*}
+}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.505\textwidth}
+\centering
+\refstepcounter{table}
+\textbf{Table \thetable:} Frozen slice/scaling report; dash is out of
+scope.\label{tab:scaling}\\[2pt]
+\scriptsize
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{@{}clcccc@{}}
+\toprule
+$K$ & Source / role & Full & Hard-$\leq32$ & Memory & Throughput \\
+\midrule
+3   & Embody / unseen-cardinality & \ResultHold & \ResultHold & \ResultHold & \ResultHold \\
+4   & Embody / seen-cardinality   & \ResultHold & \ResultHold & \ResultHold & \ResultHold \\
+8   & M3Act3D + synthetic / scale & -- & -- & \ResultHold & \ResultHold \\
+16  & M3Act3D / group-size        & -- & -- & \ResultHold & \ResultHold \\
+27  & M3Act3D / large-group       & -- & -- & \ResultHold & \ResultHold \\
+32  & synthetic / edge stress     & -- & -- & \ResultHold & \ResultHold \\
+128 & synthetic / edge stress     & -- & -- & \ResultHold & \ResultHold \\
+256 & synthetic / resource limit  & -- & -- & \ResultHold & \ResultHold \\
+\bottomrule
+\end{tabular}
+}
+\end{minipage}
+\end{minipage}
+\vspace{4pt}
+}]
 
-\section{Discussion and Limitations}
-If every registered gate passes, the supported conclusion would remain conditional and narrow: fixed dyadic complex-relation evidence provided incremental, direction-free retrieval utility on the exact frozen gallery and protocol. It would not establish a broad first, causal timing, global lead--lag, local cross-wavelet coherence, encoder equivariance, or generalization beyond the frozen study. A generic-token win would suggest capacity rather than relation binding; failure against a relation control would reject the relation thesis; failure against phase stripping would reject the phase-family thesis. Any failed rights, integrity, runtime, optimizer, dropout, data-lineage, energy-floor, or statistical-assumption gate stops the claim.
+\balance
 
-The fixed bands, pooled same-body-group statistic, principal wrapped delay, and source-cluster bootstrap define further limitations. The descriptor does not model all body-part cross-pairs, does not unwrap phase across bands, and does not infer actor roles from captions. Three seeds quantify only the registered training repetition; they do not define a seed population. The conditional bootstrap target is the exact frozen gallery and depends on its registered cluster assumptions.
+The primary endpoint is the equal-weight average of T2M group R@1 and M2T
+any-positive R@1. Secondary endpoints include bidirectional R@1/3/5/10,
+median rank, $K{=}3$, $K{=}4$, macro-$K$, parameters, FLOPs, peak memory,
+throughput, and $K$ scaling. H1 (08 vs 00) is the sole primary hypothesis. H2--H8 compare 08 with
+01--07, respectively: generic tokens, marginal power, DCT, pair-bag,
+coverage-only, incidence-shuffled, and phase-stripped controls. H2--H8 form one
+Holm family; H1 is reported separately.
 
-\section{Ethics and Rights}
-The intended dataset contains human-motion records and captions and is subject to non-commercial, controlled-host, no-redistribution constraints in the project contract. This draft accesses and exposes none of those assets. It includes no participant identifiers, raw motion, captions, rendered private samples, model weights, or private lineage. Dataset rights, owner disposition, final allowlist, and publication review must all pass before any empirical manuscript is prepared. The method must not be framed as inferring intent, identity, ability, or causality from motion.
+Group-Hard-$\leq32$ is auxiliary and never changes a group cardinality. It
+first enforces the frozen duration, per-actor marginal-band-power, total-energy,
+and root-speed calipers, then ranks eligible negatives by frozen text
+similarity. Because the sealed $K{=}3$ gallery contains only 27 captures, its
+strictly $K$-matched gallery uses all eligible $K{=}3$ candidates up to the
+32-candidate cap; it never inserts a $K{=}4$ negative or duplicates a capture.
+Insufficient caliper-matched negatives are an evaluation failure, not a reason
+to widen the rule after seeing scores. A deterministic count-only diagnostic
+must be constant within every such gallery; its reference chance is therefore
+the reciprocal of that query's actual gallery size.
 
-\section{Reproducibility Status}
-The public data-free core includes tested motion/text, residual, caption, sampler, validation, qualification, and statistical-reporting contracts, but that evidence is not an end-to-end experiment. Missing items include a qualified original-caption-to-tokenizer execution adapter, the remaining owner/license decisions, the target CUDA runtime, production execution receipts, checkpoints, scores, bootstrap outputs, authors, the official ICASSP class, and submission approval. Consequently this file is a technical-content skeleton only and must not be represented as a final submission.
+After all validation choices, caption/gallery digests, code, and aggregation
+are frozen, the protocol admits exactly one sealed-test execution. Inference
+uses 100,000 shared paired capture-level bootstrap draws; captures, not
+captions or windows, are units. The three test
+participant components also receive leave-one-component-out sensitivity
+estimates. Test data cannot select a model, checkpoint, seed, hyperparameter,
+prompt, gallery, metric, or claim. Failed/interrupted attempts remain in the
+33-run census, and failed hypotheses remain reportable.
 
+For every H1--H8 comparison, the paired contribution is formed at capture
+level after keeping all captions and windows of a capture together. Exactly
+100,000 shared bootstrap index draws produce the point difference, percentile
+interval, and two-sided tail probability. H1 is reported without multiplicity
+adjustment; the seven raw probabilities for H2--H8 enter one deterministic
+Holm step-down family. The three participant components in test are also
+removed one at a time and the full aggregate is recomputed. This sensitivity
+analysis is descriptive and cannot replace the preregistered full-gallery
+decision.
+
+Claim language is generated by a fixed decision table rather than written from
+the most favorable cell. Full must beat both pair-bag and incidence-shuffled
+before an incidence-topology statement is allowed; it must beat phase-stripped
+before a signed-phase statement is allowed; and beating the base without
+beating generic tokens is reported only as a capacity-compatible gain. Any
+null, reversal, failed run, or resource limit remains in the terminal ledger.
+One content-addressed aggregate renders JSON/CSV, LaTeX tables, figures, and
+slides, preventing a manuscript number from diverging from the released
+machine-readable result.
+
+\section{Conclusion and limits}
+At present there is no empirical conclusion. If H1 later passes, the maximum
+base-level statement is an incremental change on the exact frozen gallery and
+protocol. ``Topology-supported'' additionally requires stable superiority to
+both pair-bag (H5) and incidence-shuffled (H7); ``phase-supported'' requires
+superiority to phase-stripped (H8); ``structure-supported'' requires
+superiority to generic tokens (H2). Otherwise the report must descend to
+base-improvement-only, null, or negative. No outcome establishes causal
+coordination, universal group understanding, intent/identity/ability inference,
+generation/editing ability, encoder equivariance, or out-of-domain
+generalization.
+
+The fixed bands, pooled phase descriptors, only 27 zero-shot $K{=}3$ captures,
+three test participant components, and conditional frozen-gallery bootstrap
+limit inference. Human-motion records and text require license, privacy, and
+publication review; this repository exposes no raw motion, captions,
+participant identities, reversible memberships, or private model artifacts.
+
+\clearpage
+\sloppy
+\small
+\raggedright
 \bibliographystyle{unsrt}
 \bibliography{references}
 \end{document}

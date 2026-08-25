@@ -1,100 +1,75 @@
-# PhasePair public data-free release manifest
+# PhaseSet public data-free release manifest
 
 **Manifest snapshot:** 2026-08-25 (Asia/Shanghai)
+**Candidate:** `v0.2.0-alpha.1`
+**Scientific authority:** `AUTHORITY0 / NO_REAL_DATA_RESULT / NO_CLAIM`
 
-**Scope:** sanitized, data-free public implementation milestone
+This manifest defines the public-safe PhaseSet migration artifact. It is not a
+dataset-rights grant, server receipt, training result, completed paper, or
+submission authorization. `RELEASE_FILES.sha256` is regenerated only from the
+final staged Git index and is the byte/file-set authority for the candidate.
 
-**Scientific status:** `AUTHORITY0 / NO_SERVER_RESULT / NO_CLAIM`
+## Included families
 
-This document inventories the eligible public tree. It is not a dataset-rights
-grant, training receipt, empirical result, final-paper release, or submission
-authorization.
+- project identity: README, status, changelog, citation, license, migration,
+  contribution, security, ownership, and package metadata;
+- `src/phaseset_core/`: multi-person contracts, preprocessing, streamed
+  periodic relations, shared group models, objectives, experiment registry,
+  execution state machine, CLI, split auditing, and statistics;
+- `src/phasepair_core/`: retained dyadic v0.1.0 compatibility code and goldens;
+- synthetic/data-free tests for K=2 degeneration, actor permutations, dynamic
+  padding, chunk invariance, gradient equivariance, topology witnesses,
+  failure injection, resume, bootstrap, and public-release safety;
+- public-safe configs for the fixed split census, three base candidates, eight
+  residual systems, three seeds, optimization, sealed evaluation, and
+  statistics;
+- frozen scientific, data, execution, and experiment protocol documents;
+- no-result paper sources and editable, explicitly non-empirical figures where
+  present;
+- release-audit, manifest, link-checking, and anonymous-codeload verification
+  tools.
 
-## Repository material
+## Required verification before tagging
 
-- `README.md`, `STATUS.md`, `CHANGELOG.md`, `CITATION.cff`, and `LICENSE`;
-- `pyproject.toml` with Python 3.12--3.14 package metadata and separate exact
-  3.14.5 signal-oracle dependencies;
-- `.github/workflows/ci.yml` for 3.12.0 and 3.14.5 data-free CI;
-- `scripts/release_tree.py`, `scripts/public_release_audit.py`, and
-  `scripts/check_local_links.py` for one authority-consistent view of paths,
-  bytes, forbidden content, and repository-local link targets;
-- `scripts/release_manifest.py` plus `RELEASE_FILES.sha256` for deterministic
-  Git-index blob hashes and byte counts, independent of checkout line-ending
-  conversion, and exact file-set/hash verification in GitHub codeload archives;
-- `src/phasepair_core/` and matching synthetic/data-free tests;
-- sanitized specifications and aggregate no-result evidence under `docs/`;
-- the anonymous no-result manuscript skeleton under `paper/`;
-- the sanitized editable no-result figure deck under `slides/`.
+1. Legacy and PhaseSet unit/integration tests pass on the recorded runtime.
+2. Ruff and package/wheel builds pass from a clean Git-index snapshot.
+3. K=2 topology is exact positive zero in value and gradient, and new full
+   equals new pair-only bitwise.
+4. Exhaustive K=3..6 and stress K=8/32/128/256 permutation, padding, and chunk
+   checks pass without dense actor-pair allocations.
+5. CLI and runner fail closed when rights, private manifests, server/runtime
+   receipts, or predecessors are missing.
+6. Staged blobs and all refs pass credential, endpoint, private-path,
+   restricted-binary, data, participant-identifier, and licensing scans.
+7. `RELEASE_FILES.sha256` verifies the exact Git index, wheel source set,
+   GitHub codeload, and release asset inventory.
+8. The original PhasePair `v0.1.0` tag object and peeled commit are unchanged.
 
-## Implemented source families
+Exact pass counts, runtime identity, commit/tree/tag hashes, GitHub repository
+ID, Actions run IDs, and codeload hashes are receipts and must be inserted only
+after observation. Empty placeholders are not considered verification.
 
-The source tree contains:
+## Explicitly excluded
 
-- contracts, lineage, batching, deterministic sampler/dropout, and runtime
-  readiness diagnostics;
-- fixed signal descriptors, initialization, MIME/early/late motion towers,
-  symmetric objectives, retrieval evaluation, and paired bootstrap primitives;
-- CLIP resolution and text-runtime contracts plus a stopped authority-zero
-  live bridge;
-- execution schemas, exact-identity registries, trainer transactions,
-  checkpoint lifecycle validation, and deterministic job planning;
-- the generic, WaMo-style, InterEdit-style, no-relation, phase-stripped, and
-  PhasePair residual-head family;
-- strict caption parsing/normalization, sampler caption ordinals, complete
-  30-epoch sampler manifests, and motion/caption training-batch cross-binding;
-- full-gallery validation selection, base-system qualification, and registered
-  statistical-report rendering.
+- raw or reversible human motion, images, video, audio, captions, participant
+  identities, capture membership, or private commitments;
+- Embody 3D/Multi-TPC/M3Act3D/AIOZ-GDANCE/InterHuman/Inter-X samples,
+  download URLs, access forms, or restricted metadata;
+- SMPL-X files, CLIP or other third-party weights, private checkpoints, caches,
+  runtime wheelhouses, and licensed reference PDFs;
+- machine-fused sealed-test captions, prompts containing private payloads, raw
+  model responses, per-sample test predictions, or recoverable identifiers;
+- endpoints, usernames, host keys, credentials, tokens, secrets, private
+  receipts/logs, local absolute paths, agent state, or encrypted-backup keys.
 
-Caption/token arrays remain explicitly unverified caller assertions until the
-production tokenizer execution adapter binds the original payloads to an exact
-tokenizer invocation. The public code fails closed on that boundary.
+## Version boundary
 
-## Verification scope
+- `v0.1.0`: immutable PhasePair dyadic data-free release.
+- `v0.2.0-alpha.1`: PhaseSet identity, contracts, and migration pre-release.
+- `v0.2.0`: stable data-free multi-person core and runner, after qualification.
+- `v1.0.0`: real experimental aggregate, compliant paper, and complete public
+  provenance, only if every external and scientific gate is genuinely closed.
 
-- Windows x86-64, CPython 3.14.5 public tree: `571 passed, 3 skipped, 36
-  subtests passed`.
-- Windows x86-64, CPython 3.12.0 public tree: `570 passed, 3 skipped, 1
-  deselected, 36 subtests passed`; the deselection is the exact 3.14.5
-  signal-runtime identity test.
-- Ubuntu portability lane: public audit, checksum manifest, local links, Ruff,
-  and no-dependency wheel build; it does not qualify the fixed signal oracle.
-- Ruff: clean across `src`, `tests`, and `scripts`.
-- Release-tool regression tests reject parent-repository attachment, empty
-  passes, archive tampering/extra files, and Git-index/worktree divergence.
-- The no-result manuscript builds to four pages with BibTeX, no undefined
-  citation/reference, and no overfull horizontal box.
-- Independent caption/training/sampler review: PASS for bare-CR handling,
-  receipt privacy, exact-type issuance, rebind/forgery rejection, ordinal
-  binding, and cross-epoch/cross-seed replay rejection.
-
-These checks establish scoped software behavior only. They do not establish
-data rights, server compatibility, model quality, statistical significance, or
-paper claims.
-
-## Intentionally excluded
-
-The public release must not contain:
-
-- third-party dataset samples, captions, identifiers, split membership, or
-  reconstructable private commitments;
-- CLIP weights, runtime wheel archives, or other restricted third-party bytes;
-- credentials, access endpoints, usernames, keys, tokens, or private paths;
-- private receipts, raw logs, checkpoints, unpublished results, or per-sample
-  outputs;
-- local agent state, ARIS private traces, debug/compile products, caches, or
-  licensed reference-paper PDFs.
-
-## Not yet produced
-
-- qualified original-caption-to-tokenizer execution-adapter receipt;
-- target-server runtime receipt and the authorized 9 base + 18 residual runs;
-- 21-row score matrix, registered bootstrap output, H1--H6 decisions, and Holm
-  correction evidence;
-- final empirical figures, quantitative tables, official-format manuscript,
-  final presentation, and conference submission bundle;
-- final empirical release tag and post-result anonymous-clone audit.
-
-The tracked-file checksum manifest certifies only the bytes in this data-free
-snapshot. It must be regenerated and reverified whenever any tracked file
-changes.
+Negative results do not block a release when accurately represented. Missing
+rights, fabricated evidence, leaked restricted material, or an unsealed test
+does block it.

@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import zipfile
+import zlib
 from pathlib import Path, PurePosixPath
 
 sys.dont_write_bytecode = True
@@ -97,6 +98,73 @@ def _scan_pptx(raw: bytes, label: str) -> None:
         raise PublicReleaseAuditError(f"invalid PPTX archive: {label}") from exc
 
 
+def _scan_png(raw: bytes, label: str) -> None:
+    """Validate PNG framing/CRC and inspect embedded textual diagram payloads."""
+
+    if not raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise PublicReleaseAuditError(f"invalid PNG signature: {label}")
+    offset = 8
+    saw_iend = False
+    while offset < len(raw):
+        if offset + 12 > len(raw):
+            raise PublicReleaseAuditError(f"truncated PNG chunk: {label}")
+        length = int.from_bytes(raw[offset : offset + 4], "big")
+        chunk_type = raw[offset + 4 : offset + 8]
+        end = offset + 12 + length
+        if length > 64 * 1024 * 1024 or end > len(raw):
+            raise PublicReleaseAuditError(f"invalid PNG chunk length: {label}")
+        payload = raw[offset + 8 : offset + 8 + length]
+        expected_crc = int.from_bytes(raw[offset + 8 + length : end], "big")
+        actual_crc = zlib.crc32(chunk_type + payload) & 0xFFFFFFFF
+        if actual_crc != expected_crc:
+            raise PublicReleaseAuditError(f"PNG CRC mismatch: {label}")
+        if chunk_type == b"tEXt":
+            _scan_bytes(payload, f"{label}!/tEXt")
+        elif chunk_type == b"zTXt":
+            try:
+                _, compressed = payload.split(b"\x00\x00", 1)
+                decoded = zlib.decompress(compressed)
+            except (ValueError, zlib.error) as exc:
+                raise PublicReleaseAuditError(f"invalid compressed PNG text: {label}") from exc
+            if len(decoded) > 32 * 1024 * 1024:
+                raise PublicReleaseAuditError(f"oversized PNG text payload: {label}")
+            _scan_bytes(decoded, f"{label}!/zTXt")
+        elif chunk_type == b"iTXt":
+            # keyword NUL, compression flag/method, language NUL, translated
+            # keyword NUL, then UTF-8 text (optionally zlib-compressed).
+            try:
+                _, tail = payload.split(b"\x00", 1)
+                compression_flag, compression_method = tail[0], tail[1]
+                tail = tail[2:]
+                _, tail = tail.split(b"\x00", 1)
+                _, text_payload = tail.split(b"\x00", 1)
+                if compression_flag == 1 and compression_method == 0:
+                    text_payload = zlib.decompress(text_payload)
+                elif compression_flag != 0:
+                    raise ValueError("unsupported iTXt compression")
+            except (IndexError, ValueError, zlib.error) as exc:
+                raise PublicReleaseAuditError(f"invalid PNG international text: {label}") from exc
+            if len(text_payload) > 32 * 1024 * 1024:
+                raise PublicReleaseAuditError(f"oversized PNG text payload: {label}")
+            _scan_bytes(text_payload, f"{label}!/iTXt")
+        if chunk_type == b"IEND":
+            saw_iend = True
+            if end != len(raw):
+                raise PublicReleaseAuditError(f"trailing bytes after PNG IEND: {label}")
+            break
+        offset = end
+    if not saw_iend:
+        raise PublicReleaseAuditError(f"PNG lacks IEND: {label}")
+
+
+def _scan_pdf(raw: bytes, label: str) -> None:
+    """Perform structural boundary checks and scan raw public PDF bytes."""
+
+    if not raw.startswith(b"%PDF-") or b"%%EOF" not in raw[-2048:]:
+        raise PublicReleaseAuditError(f"invalid PDF framing: {label}")
+    _scan_bytes(raw, label)
+
+
 def audit() -> tuple[int, int]:
     tree = resolve_release_tree(ROOT)
     paths = _validated_paths(tree.paths)
@@ -105,8 +173,13 @@ def audit() -> tuple[int, int]:
         raw = tree.read_bytes(relative)
         total_bytes += len(raw)
         label = relative.as_posix()
-        if relative.suffix.casefold() == ".pptx":
+        suffix = relative.suffix.casefold()
+        if suffix == ".pptx":
             _scan_pptx(raw, label)
+        elif suffix == ".png":
+            _scan_png(raw, label)
+        elif suffix == ".pdf":
+            _scan_pdf(raw, label)
         else:
             if b"\0" in raw:
                 raise PublicReleaseAuditError(f"unexpected binary tracked file: {label}")

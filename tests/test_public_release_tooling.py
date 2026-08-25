@@ -3,9 +3,11 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
+import zlib
 from pathlib import Path
 
 
@@ -62,6 +64,24 @@ def _git(root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
         check=False,
         text=True,
         capture_output=True,
+    )
+
+
+def _png_with_text(text: bytes) -> bytes:
+    def chunk(kind: bytes, payload: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(payload))
+            + kind
+            + payload
+            + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
+        )
+
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 6, 0, 0, 0))
+        + chunk(b"tEXt", b"Description\x00" + text)
+        + chunk(b"IDAT", zlib.compress(b"\x00\x00\x00\x00\x00"))
+        + chunk(b"IEND", b"")
     )
 
 
@@ -152,6 +172,31 @@ def test_manifest_build_refuses_an_archive_authority() -> None:
         completed = _run(archive, "release_manifest.py", "build")
         assert completed.returncode == 1
         assert "manifest build requires the exact Git checkout" in completed.stderr
+
+
+def test_public_audit_accepts_valid_figure_exports_and_scans_png_text() -> None:
+    with tempfile.TemporaryDirectory(prefix=".phaseset-figures-", dir=REPOSITORY_ROOT) as raw:
+        archive = Path(raw)
+        scripts = archive / "scripts"
+        figures = archive / "figures"
+        scripts.mkdir()
+        figures.mkdir()
+        for name in SCRIPT_NAMES:
+            shutil.copy2(REPOSITORY_ROOT / "scripts" / name, scripts / name)
+        (archive / "README.md").write_text("figure fixture\n", encoding="utf-8")
+        png_path = figures / "figure.png"
+        png_path.write_bytes(_png_with_text(b"public PhaseSet figure"))
+        (figures / "figure.pdf").write_bytes(b"%PDF-1.4\n%\x00binary\n%%EOF\n")
+        _write_manifest(archive)
+
+        clean = _run(archive, "public_release_audit.py")
+        assert clean.returncode == 0, clean.stdout + clean.stderr
+
+        png_path.write_bytes(_png_with_text(b"192.0.2.1" + b":" + b"33123"))
+        _write_manifest(archive)
+        rejected = _run(archive, "public_release_audit.py")
+        assert rejected.returncode == 1
+        assert "credential or endpoint pattern" in rejected.stdout + rejected.stderr
 
 
 def test_git_mode_reads_index_bytes_and_paths_not_unstaged_worktree() -> None:
