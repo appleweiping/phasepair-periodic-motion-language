@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import os
 import shutil
@@ -7,6 +8,8 @@ import struct
 import subprocess
 import sys
 import tempfile
+import urllib.parse
+import zipfile
 import zlib
 from pathlib import Path
 
@@ -197,6 +200,153 @@ def test_public_audit_accepts_valid_figure_exports_and_scans_png_text() -> None:
         rejected = _run(archive, "public_release_audit.py")
         assert rejected.returncode == 1
         assert "credential or endpoint pattern" in rejected.stdout + rejected.stderr
+
+
+def test_public_audit_decodes_pdf_streams_and_rejects_active_content() -> None:
+    with tempfile.TemporaryDirectory(prefix=".phaseset-pdf-", dir=REPOSITORY_ROOT) as raw:
+        archive = Path(raw)
+        scripts = archive / "scripts"
+        figures = archive / "figures"
+        scripts.mkdir()
+        figures.mkdir()
+        for name in SCRIPT_NAMES:
+            shutil.copy2(REPOSITORY_ROOT / "scripts" / name, scripts / name)
+        (archive / "README.md").write_text("PDF audit fixture\n", encoding="utf-8")
+        pdf = figures / "figure.pdf"
+
+        hidden = b"C:" + b"\\" + b"restricted" + b"\\lineage.json"
+        compressed = zlib.compress(hidden)
+        pdf.write_bytes(
+            b"%PDF-1.7\n1 0 obj\n<< /Length "
+            + str(len(compressed)).encode()
+            + b" /Filter /FlateDecode >>\nstream\n"
+            + compressed
+            + b"\nendstream\nendobj\n%%EOF\n"
+        )
+        _write_manifest(archive)
+        rejected_stream = _run(archive, "public_release_audit.py")
+        assert rejected_stream.returncode == 1
+        assert "private/local locator" in rejected_stream.stdout + rejected_stream.stderr
+
+        pdf.write_bytes(
+            b"%PDF-1.7\n1 0 obj\n<< /Type /Filespec /EF << /F 2 0 R >> >>\n"
+            b"endobj\n%%EOF\n"
+        )
+        _write_manifest(archive)
+        rejected_attachment = _run(archive, "public_release_audit.py")
+        assert rejected_attachment.returncode == 1
+        assert "attachment or active content" in (
+            rejected_attachment.stdout + rejected_attachment.stderr
+        )
+
+
+def test_public_audit_decodes_pdf_name_escapes_and_rejects_malformed_names() -> None:
+    with tempfile.TemporaryDirectory(prefix=".phaseset-pdf-name-", dir=REPOSITORY_ROOT) as raw:
+        archive = Path(raw)
+        scripts = archive / "scripts"
+        scripts.mkdir()
+        for name in SCRIPT_NAMES:
+            shutil.copy2(REPOSITORY_ROOT / "scripts" / name, scripts / name)
+        (archive / "escaped.pdf").write_bytes(
+            b"%PDF-1.7\n1 0 obj\n<< /Open#41ction 2 0 R /Java#53cript (x) >>\n"
+            b"endobj\n%%EOF\n"
+        )
+        _write_manifest(archive)
+        escaped = _run(archive, "public_release_audit.py")
+        assert escaped.returncode == 1
+        assert "attachment or active content" in escaped.stdout + escaped.stderr
+
+        (archive / "escaped.pdf").write_bytes(
+            b"%PDF-1.7\n1 0 obj\n<< /Java#G0Script (x) >>\nendobj\n%%EOF\n"
+        )
+        _write_manifest(archive)
+        malformed = _run(archive, "public_release_audit.py")
+        assert malformed.returncode == 1
+        assert "malformed PDF name escape" in malformed.stdout + malformed.stderr
+
+
+def test_public_audit_rejects_png_ancillary_metadata_and_pptx_binary_media() -> None:
+    with tempfile.TemporaryDirectory(prefix=".phaseset-container-", dir=REPOSITORY_ROOT) as raw:
+        archive = Path(raw)
+        scripts = archive / "scripts"
+        scripts.mkdir()
+        for name in SCRIPT_NAMES:
+            shutil.copy2(REPOSITORY_ROOT / "scripts" / name, scripts / name)
+
+        png = archive / "metadata.png"
+        png.write_bytes(_png_with_text(b"public").replace(
+            struct.pack(">I", 0) + b"IEND",
+            struct.pack(">I", 8)
+            + b"eXIf"
+            + b"metadata"
+            + struct.pack(">I", zlib.crc32(b"eXIfmetadata") & 0xFFFFFFFF)
+            + struct.pack(">I", 0)
+            + b"IEND",
+        ))
+        _write_manifest(archive)
+        png_rejected = _run(archive, "public_release_audit.py")
+        assert png_rejected.returncode == 1
+        assert "unsupported PNG ancillary" in png_rejected.stdout + png_rejected.stderr
+
+        png.unlink()
+        pptx = archive / "binary-media.pptx"
+        with zipfile.ZipFile(pptx, "w") as package:
+            package.writestr(
+                "[Content_Types].xml",
+                b'<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>',
+            )
+            package.writestr(
+                "_rels/.rels",
+                b'<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>',
+            )
+            package.writestr(
+                "ppt/presentation.xml",
+                b'<?xml version="1.0"?><p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>',
+            )
+            package.writestr("ppt/media/recording.mp4", b"opaque media bytes")
+        _write_manifest(archive)
+        pptx_rejected = _run(archive, "public_release_audit.py")
+        assert pptx_rejected.returncode == 1
+        assert "unsupported PPTX media" in pptx_rejected.stdout + pptx_rejected.stderr
+
+
+def test_public_audit_recursively_decodes_svg_and_drawio_payloads() -> None:
+    with tempfile.TemporaryDirectory(prefix=".phaseset-xml-", dir=REPOSITORY_ROOT) as raw:
+        archive = Path(raw)
+        scripts = archive / "scripts"
+        scripts.mkdir()
+        for name in SCRIPT_NAMES:
+            shutil.copy2(REPOSITORY_ROOT / "scripts" / name, scripts / name)
+        hidden = b"C:" + b"\\" + b"restricted" + b"\\capture.bin"
+
+        svg = archive / "encoded.svg"
+        encoded = base64.b64encode(hidden).decode()
+        svg.write_text(
+            '<svg xmlns="http://www.w3.org/2000/svg"><image href="data:text/plain;base64,'
+            + encoded
+            + '"/></svg>\n',
+            encoding="utf-8",
+        )
+        _write_manifest(archive)
+        svg_rejected = _run(archive, "public_release_audit.py")
+        assert svg_rejected.returncode == 1
+        assert "private/local locator" in svg_rejected.stdout + svg_rejected.stderr
+
+        svg.unlink()
+        nested = b'<mxGraphModel><root><mxCell value="' + hidden + b'"/></root></mxGraphModel>'
+        quoted = urllib.parse.quote_from_bytes(nested).encode()
+        compressor = zlib.compressobj(level=9, wbits=-15)
+        compressed = compressor.compress(quoted) + compressor.flush()
+        (archive / "encoded.drawio").write_text(
+            '<mxfile><diagram>'
+            + base64.b64encode(compressed).decode()
+            + '</diagram></mxfile>\n',
+            encoding="utf-8",
+        )
+        _write_manifest(archive)
+        drawio_rejected = _run(archive, "public_release_audit.py")
+        assert drawio_rejected.returncode == 1
+        assert "private/local locator" in drawio_rejected.stdout + drawio_rejected.stderr
 
 
 def test_git_mode_reads_index_bytes_and_paths_not_unstaged_worktree() -> None:
