@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "phaseset-core"
-version = "0.2.0a1"
+version = "0.2.0"
 description = "Permutation-invariant periodic relation tokens for multi-person motion-language research"
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
-license = { text = "MIT" }
+license = "MIT"
 authors = [{ name = "PhaseSet contributors" }]
 dependencies = [
   "numpy>=1.26,<3",

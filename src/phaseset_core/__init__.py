@@ -8,7 +8,7 @@ private identifiers, server locators, checkpoints, or empirical claims.
 from __future__ import annotations
 
 
-__version__ = "0.2.0a1"
+__version__ = "0.2.0"
 STATUS = "DATA_FREE_MULTIPERSON_AUTHORITY0"
 CONTRACT_FAMILY = "PHASESET_SCIENTIFIC_CONTRACT_V1"
 LEGACY_CONTRACT_FAMILY = "PHASEPAIR_SCIENTIFIC_CONTRACT_20260824_165840"

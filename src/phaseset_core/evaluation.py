@@ -6,8 +6,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 import math
-from typing import Iterable
-
+import re
 import numpy as np
 
 
@@ -30,6 +29,7 @@ class RetrievalDataset:
 @dataclass(frozen=True, slots=True)
 class DirectionMetrics:
     query_count: int
+    aggregation_unit_count: int
     recall_at_1: float
     recall_at_3: float
     recall_at_5: float
@@ -45,12 +45,60 @@ class BidirectionalMetrics:
 
 
 @dataclass(frozen=True, slots=True)
+class CaptureR1Contribution:
+    """One capture-cluster's two directional R@1 contribution.
+
+    A capture cluster is one connected component of the frozen caption-to-
+    positive-motion relation. Commitments, rather than table positions, define
+    canonical query order and the cluster identity.
+    """
+
+    capture_commitment: bytes
+    caption_commitments: tuple[bytes, ...]
+    motion_commitments: tuple[bytes, ...]
+    text_to_motion_hits: tuple[int, ...]
+    motion_to_text_hits: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class EvaluationReport:
     full_gallery: BidirectionalMetrics
     by_group_size: tuple[tuple[int, BidirectionalMetrics], ...]
     macro_group_size: BidirectionalMetrics
     leave_one_component_out: tuple[tuple[str, BidirectionalMetrics], ...]
+    capture_contributions: tuple[CaptureR1Contribution, ...]
     dataset_sha256: str
+    evaluation_type: str = "UNBOUND_SYNTHETIC"
+    census_provenance_sha256: str | None = None
+    score_provenance_sha256: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class HardNegativeScorerProvenance:
+    """Externally frozen text-only scorer lineage for hard-negative selection."""
+
+    scorer_id: str
+    scorer_code_sha256: str
+    scorer_checkpoint_sha256: str
+    freeze_receipt_sha256: str
+    caption_manifest_sha256: str
+    motion_manifest_sha256: str
+    frozen_at_utc: str
+    evaluated_checkpoint_sha256s: tuple[str, ...]
+    text_only: bool = True
+    frozen_before_evaluation: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class HardGalleryFreezeBinding:
+    """Trusted expected digests fixed before hard-gallery construction."""
+
+    scorer_provenance_sha256: str
+    similarity_sha256: str
+    freeze_receipt_sha256: str
+    caption_manifest_sha256: str
+    motion_manifest_sha256: str
+    external_authorization_sha256: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +111,7 @@ class HardNegativeFeatures:
     total_motion_energy: np.ndarray
     root_speed: np.ndarray
     frozen_text_similarity: np.ndarray
+    scorer_provenance: HardNegativeScorerProvenance
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +137,23 @@ class HardGallery:
     motion_indices: tuple[int, ...]
     maximum_candidate_count: int
     gallery_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class HardGalleryCollection:
+    galleries: tuple[HardGallery, ...]
+    scorer_provenance: HardNegativeScorerProvenance
+    freeze_binding: HardGalleryFreezeBinding
+    selection_binding_sha256: str
+    retrieval_census_sha256: str
+    collection_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class _CaptureCluster:
+    commitment: bytes
+    motion_indices: tuple[int, ...]
+    caption_indices: tuple[int, ...]
 
 
 def _commitment(value: object, label: str) -> bytes:
@@ -206,20 +272,138 @@ def _ranks(
     return ranks
 
 
-def _metrics(ranks: np.ndarray) -> DirectionMetrics:
-    if ranks.ndim != 1 or ranks.size == 0:
-        raise EvaluationContractError("direction metrics require at least one query")
+def _capture_clusters(dataset: RetrievalDataset) -> tuple[_CaptureCluster, ...]:
+    """Return canonical capture units from the frozen positive-relation graph."""
+
+    motion_count, caption_count = dataset.scores.shape
+    parent = list(range(motion_count + caption_count))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(left: int, right: int) -> None:
+        root_left = find(left)
+        root_right = find(right)
+        if root_left == root_right:
+            return
+        if root_left < root_right:
+            parent[root_right] = root_left
+        else:
+            parent[root_left] = root_right
+
+    for caption_index, positives in enumerate(dataset.positive_motion_indices):
+        caption_node = motion_count + caption_index
+        for motion_index in positives:
+            union(caption_node, motion_index)
+
+    motions_by_root: dict[int, list[int]] = {}
+    captions_by_root: dict[int, list[int]] = {}
+    for motion_index in range(motion_count):
+        motions_by_root.setdefault(find(motion_index), []).append(motion_index)
+    for caption_index in range(caption_count):
+        captions_by_root.setdefault(find(motion_count + caption_index), []).append(caption_index)
+    if set(motions_by_root) != set(captions_by_root):
+        raise EvaluationContractError("positive relation produced an incomplete capture cluster")
+
+    clusters: list[_CaptureCluster] = []
+    for root in motions_by_root:
+        motion_indices = tuple(
+            sorted(
+                motions_by_root[root],
+                key=lambda index: dataset.motion_commitments[index],
+            )
+        )
+        caption_indices = tuple(
+            sorted(
+                captions_by_root[root],
+                key=lambda index: dataset.caption_commitments[index],
+            )
+        )
+        motion_set = set(motion_indices)
+        payload = {
+            "caption_positive_motion_edges": [
+                {
+                    "caption": dataset.caption_commitments[caption_index].hex(),
+                    "motions": [
+                        dataset.motion_commitments[motion_index].hex()
+                        for motion_index in dataset.positive_motion_indices[caption_index]
+                    ],
+                }
+                for caption_index in caption_indices
+            ],
+            "domain": "phaseset-capture-cluster-v1",
+            "motions": [
+                dataset.motion_commitments[motion_index].hex()
+                for motion_index in motion_indices
+            ],
+        }
+        if any(
+            not set(dataset.positive_motion_indices[caption_index]).issubset(motion_set)
+            for caption_index in caption_indices
+        ):
+            raise EvaluationContractError("capture cluster split a positive relation")
+        raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("ascii")
+        clusters.append(
+            _CaptureCluster(
+                commitment=hashlib.sha256(raw).digest(),
+                motion_indices=motion_indices,
+                caption_indices=caption_indices,
+            )
+        )
+    ordered = tuple(sorted(clusters, key=lambda value: value.commitment))
+    if len({cluster.commitment for cluster in ordered}) != len(ordered):
+        raise EvaluationContractError("capture-cluster commitments are not unique")
+    return ordered
+
+
+def _metrics(
+    ranks: np.ndarray,
+    query_groups: tuple[tuple[int, ...], ...],
+) -> DirectionMetrics:
+    """Aggregate queries inside capture first, then macro-average captures."""
+
+    if ranks.ndim != 1 or ranks.size == 0 or not query_groups:
+        raise EvaluationContractError("direction metrics require queries and capture units")
+    flattened = [index for group in query_groups for index in group]
+    if (
+        any(type(group) is not tuple or not group for group in query_groups)
+        or sorted(flattened) != list(range(int(ranks.size)))
+        or len(flattened) != len(set(flattened))
+    ):
+        raise EvaluationContractError("direction query groups must partition all queries")
+
+    def capture_macro_recall(limit: int) -> float:
+        return float(
+            np.mean(
+                [
+                    np.mean(ranks[np.asarray(group, dtype=np.int64)] <= limit)
+                    for group in query_groups
+                ]
+            )
+        )
+
     return DirectionMetrics(
         query_count=int(ranks.size),
-        recall_at_1=float(np.mean(ranks <= 1)),
-        recall_at_3=float(np.mean(ranks <= 3)),
-        recall_at_5=float(np.mean(ranks <= 5)),
-        recall_at_10=float(np.mean(ranks <= 10)),
-        median_rank=float(np.median(ranks)),
+        aggregation_unit_count=len(query_groups),
+        recall_at_1=capture_macro_recall(1),
+        recall_at_3=capture_macro_recall(3),
+        recall_at_5=capture_macro_recall(5),
+        recall_at_10=capture_macro_recall(10),
+        median_rank=float(
+            np.mean(
+                [
+                    np.median(ranks[np.asarray(group, dtype=np.int64)])
+                    for group in query_groups
+                ]
+            )
+        ),
     )
 
 
-def _evaluate(dataset: RetrievalDataset) -> BidirectionalMetrics:
+def _bidirectional_ranks(dataset: RetrievalDataset) -> tuple[np.ndarray, np.ndarray]:
     text_ranks = _ranks(
         dataset.scores.T,
         dataset.motion_commitments,
@@ -234,13 +418,65 @@ def _evaluate(dataset: RetrievalDataset) -> BidirectionalMetrics:
         dataset.caption_commitments,
         tuple(tuple(row) for row in captions_by_motion),
     )
-    text = _metrics(text_ranks)
-    motion = _metrics(motion_ranks)
+    return text_ranks, motion_ranks
+
+
+def _evaluate(dataset: RetrievalDataset) -> BidirectionalMetrics:
+    text_ranks, motion_ranks = _bidirectional_ranks(dataset)
+    clusters = _capture_clusters(dataset)
+    text = _metrics(
+        text_ranks,
+        tuple(cluster.caption_indices for cluster in clusters),
+    )
+    motion = _metrics(
+        motion_ranks,
+        tuple(cluster.motion_indices for cluster in clusters),
+    )
     return BidirectionalMetrics(
         text_to_motion=text,
         motion_to_text=motion,
         primary=0.5 * (text.recall_at_1 + motion.recall_at_1),
     )
+
+
+def capture_r1_contributions(
+    value: object,
+) -> tuple[CaptureR1Contribution, ...]:
+    """Expose the exact capture-macro primary endpoint contribution rows."""
+
+    dataset = validate_retrieval_dataset(value)
+    text_ranks, motion_ranks = _bidirectional_ranks(dataset)
+    output: list[CaptureR1Contribution] = []
+    for cluster in _capture_clusters(dataset):
+        output.append(
+            CaptureR1Contribution(
+                capture_commitment=cluster.commitment,
+                caption_commitments=tuple(
+                    dataset.caption_commitments[index]
+                    for index in cluster.caption_indices
+                ),
+                motion_commitments=tuple(
+                    dataset.motion_commitments[index]
+                    for index in cluster.motion_indices
+                ),
+                text_to_motion_hits=tuple(
+                    int(text_ranks[index] <= 1)
+                    for index in cluster.caption_indices
+                ),
+                motion_to_text_hits=tuple(
+                    int(motion_ranks[index] <= 1)
+                    for index in cluster.motion_indices
+                ),
+            )
+        )
+    return tuple(output)
+
+
+def capture_cluster_commitments(value: object) -> tuple[bytes, ...]:
+    """Return canonical capture identities without exposing table positions."""
+
+    dataset = validate_retrieval_dataset(value)
+    return tuple(cluster.commitment for cluster in _capture_clusters(dataset))
 
 
 def _subset(dataset: RetrievalDataset, motion_indices: tuple[int, ...]) -> RetrievalDataset:
@@ -280,6 +516,7 @@ def _macro(rows: tuple[BidirectionalMetrics, ...]) -> BidirectionalMetrics:
         count = len(values)
         return DirectionMetrics(
             query_count=sum(item.query_count for item in values),
+            aggregation_unit_count=sum(item.aggregation_unit_count for item in values),
             recall_at_1=sum(item.recall_at_1 for item in values) / count,
             recall_at_3=sum(item.recall_at_3 for item in values) / count,
             recall_at_5=sum(item.recall_at_5 for item in values) / count,
@@ -307,6 +544,141 @@ def _dataset_digest(dataset: RetrievalDataset) -> str:
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("ascii")
     return hashlib.sha256(raw).hexdigest()
+
+
+def retrieval_census_sha256(dataset_value: object) -> str:
+    """Digest query identities/positives/strata without binding model scores."""
+
+    dataset = validate_retrieval_dataset(dataset_value)
+    payload = {
+        "caption_commitments": [value.hex() for value in dataset.caption_commitments],
+        "component_labels": list(dataset.component_labels),
+        "group_sizes": dataset.group_sizes.tolist(),
+        "motion_commitments": [value.hex() for value in dataset.motion_commitments],
+        "positive_motion_indices": [list(row) for row in dataset.positive_motion_indices],
+        "schema": "phaseset-retrieval-query-census-v1",
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("ascii")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def canonical_evaluation_report_bytes(value: object) -> bytes:
+    """Serialize one computed evaluation report with exact private lineage.
+
+    This format is intended for private execution evidence. Commitments are
+    cryptographic identities, never model inputs, and are retained here so a
+    later paired bootstrap can prove an identical query census.
+    """
+
+    if type(value) is not EvaluationReport:
+        raise TypeError("value must be exact EvaluationReport")
+
+    def direction(row: object) -> dict[str, object]:
+        if type(row) is not DirectionMetrics:
+            raise TypeError("direction row must be exact DirectionMetrics")
+        if (
+            type(row.query_count) is not int
+            or row.query_count < 1
+            or type(row.aggregation_unit_count) is not int
+            or row.aggregation_unit_count < 1
+        ):
+            raise EvaluationContractError("direction metric counts are invalid")
+        values = {
+            name: float(getattr(row, name))
+            for name in (
+                "recall_at_1",
+                "recall_at_3",
+                "recall_at_5",
+                "recall_at_10",
+                "median_rank",
+            )
+        }
+        if any(not math.isfinite(item) for item in values.values()):
+            raise EvaluationContractError("direction metrics must be finite")
+        if any(
+            not 0.0 <= values[name] <= 1.0
+            for name in ("recall_at_1", "recall_at_3", "recall_at_5", "recall_at_10")
+        ):
+            raise EvaluationContractError("recall metrics must lie in [0,1]")
+        return {
+            "aggregation_unit_count": row.aggregation_unit_count,
+            "median_rank_hex": values["median_rank"].hex(),
+            "query_count": row.query_count,
+            "recall_at_10_hex": values["recall_at_10"].hex(),
+            "recall_at_1_hex": values["recall_at_1"].hex(),
+            "recall_at_3_hex": values["recall_at_3"].hex(),
+            "recall_at_5_hex": values["recall_at_5"].hex(),
+        }
+
+    def bidirectional(row: object) -> dict[str, object]:
+        if type(row) is not BidirectionalMetrics:
+            raise TypeError("metric row must be exact BidirectionalMetrics")
+        primary = float(row.primary)
+        if not math.isfinite(primary) or not 0.0 <= primary <= 1.0:
+            raise EvaluationContractError("primary metric must lie in [0,1]")
+        return {
+            "motion_to_text": direction(row.motion_to_text),
+            "primary_hex": primary.hex(),
+            "text_to_motion": direction(row.text_to_motion),
+        }
+
+    if (
+        type(value.dataset_sha256) is not str
+        or len(value.dataset_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in value.dataset_sha256)
+    ):
+        raise EvaluationContractError("evaluation dataset digest is invalid")
+    contributions: list[dict[str, object]] = []
+    for row in value.capture_contributions:
+        if type(row) is not CaptureR1Contribution:
+            raise TypeError("capture contribution must be exact CaptureR1Contribution")
+        if (
+            type(row.capture_commitment) is not bytes
+            or len(row.capture_commitment) != 32
+            or not row.caption_commitments
+            or not row.motion_commitments
+            or row.caption_commitments != tuple(sorted(row.caption_commitments))
+            or row.motion_commitments != tuple(sorted(row.motion_commitments))
+            or len(row.text_to_motion_hits) != len(row.caption_commitments)
+            or len(row.motion_to_text_hits) != len(row.motion_commitments)
+            or any(item not in {0, 1} for item in row.text_to_motion_hits)
+            or any(item not in {0, 1} for item in row.motion_to_text_hits)
+        ):
+            raise EvaluationContractError("capture contribution lineage is invalid")
+        contributions.append(
+            {
+                "caption_commitments": [item.hex() for item in row.caption_commitments],
+                "capture_commitment": row.capture_commitment.hex(),
+                "motion_commitments": [item.hex() for item in row.motion_commitments],
+                "motion_to_text_hits": list(row.motion_to_text_hits),
+                "text_to_motion_hits": list(row.text_to_motion_hits),
+            }
+        )
+    payload = {
+        "by_group_size": [
+            {"group_size": group_size, "metrics": bidirectional(metrics)}
+            for group_size, metrics in value.by_group_size
+        ],
+        "capture_contributions": contributions,
+        "dataset_sha256": value.dataset_sha256,
+        "evaluation_type": value.evaluation_type,
+        "full_gallery": bidirectional(value.full_gallery),
+        "leave_one_component_out": [
+            {"component": label, "metrics": bidirectional(metrics)}
+            for label, metrics in value.leave_one_component_out
+        ],
+        "macro_group_size": bidirectional(value.macro_group_size),
+        "census_provenance_sha256": value.census_provenance_sha256,
+        "schema": "phaseset-private-evaluation-report-v1",
+        "score_provenance_sha256": value.score_provenance_sha256,
+    }
+    return json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("ascii") + b"\n"
 
 
 def evaluate_retrieval(value: object) -> EvaluationReport:
@@ -345,6 +717,7 @@ def evaluate_retrieval(value: object) -> EvaluationReport:
         by_group_size=tuple(by_k),
         macro_group_size=_macro(tuple(row for _, row in by_k)),
         leave_one_component_out=tuple(component_rows),
+        capture_contributions=capture_r1_contributions(dataset),
         dataset_sha256=_dataset_digest(dataset),
     )
 
@@ -364,6 +737,143 @@ def _finite_vector(
     ):
         raise EvaluationContractError(f"{label} has invalid shape or values")
     return array
+
+
+def _array_sha256(value: np.ndarray, dtype: str) -> str:
+    canonical = np.asarray(value, dtype=dtype, order="C")
+    header = json.dumps(
+        {"dtype": canonical.dtype.str, "shape": list(canonical.shape)},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("ascii")
+    return hashlib.sha256(header + b"\n" + canonical.tobytes(order="C")).hexdigest()
+
+
+_LOWER_SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+_SECOND_UTC = re.compile(
+    r"(?:19|20)\d\d-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])"
+    r"T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\dZ\Z"
+)
+
+
+def _hard_scorer_provenance_bytes(value: object) -> bytes:
+    if type(value) is not HardNegativeScorerProvenance:
+        raise TypeError(
+            "scorer_provenance must be exact HardNegativeScorerProvenance"
+        )
+    if (
+        type(value.scorer_id) is not str
+        or not value.scorer_id
+        or not value.scorer_id.isascii()
+        or len(value.scorer_id) > 128
+    ):
+        raise EvaluationContractError("hard scorer id must be bounded nonempty ASCII")
+    digest_fields = (
+        "scorer_code_sha256",
+        "scorer_checkpoint_sha256",
+        "freeze_receipt_sha256",
+        "caption_manifest_sha256",
+        "motion_manifest_sha256",
+    )
+    for name in digest_fields:
+        item = getattr(value, name)
+        if type(item) is not str or _LOWER_SHA256.fullmatch(item) is None:
+            raise EvaluationContractError(f"hard scorer {name} is not lowercase SHA-256")
+    if type(value.frozen_at_utc) is not str or _SECOND_UTC.fullmatch(
+        value.frozen_at_utc
+    ) is None:
+        raise EvaluationContractError("hard scorer freeze time is not exact UTC")
+    evaluated = value.evaluated_checkpoint_sha256s
+    if (
+        type(evaluated) is not tuple
+        or len(evaluated) != 27
+        or any(type(item) is not str or _LOWER_SHA256.fullmatch(item) is None for item in evaluated)
+        or evaluated != tuple(sorted(evaluated))
+        or len(evaluated) != len(set(evaluated))
+    ):
+        raise EvaluationContractError(
+            "hard scorer must bind the canonical 27-checkpoint evaluation census"
+        )
+    if value.scorer_checkpoint_sha256 in evaluated:
+        raise EvaluationContractError(
+            "hard scorer checkpoint cannot be an evaluated system checkpoint"
+        )
+    if value.text_only is not True or value.frozen_before_evaluation is not True:
+        raise EvaluationContractError(
+            "hard-negative scorer must be independently frozen and text-only"
+        )
+    return (
+        json.dumps(
+            {
+                "caption_manifest_sha256": value.caption_manifest_sha256,
+                "evaluated_checkpoint_sha256s": list(evaluated),
+                "freeze_receipt_sha256": value.freeze_receipt_sha256,
+                "frozen_at_utc": value.frozen_at_utc,
+                "frozen_before_evaluation": value.frozen_before_evaluation,
+                "motion_manifest_sha256": value.motion_manifest_sha256,
+                "schema": "phaseset-hard-negative-scorer-provenance-v1",
+                "scorer_checkpoint_sha256": value.scorer_checkpoint_sha256,
+                "scorer_code_sha256": value.scorer_code_sha256,
+                "scorer_id": value.scorer_id,
+                "text_only": value.text_only,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("ascii")
+        + b"\n"
+    )
+
+
+def hard_negative_scorer_provenance_sha256(value: object) -> str:
+    return hashlib.sha256(_hard_scorer_provenance_bytes(value)).hexdigest()
+
+
+def hard_negative_similarity_sha256(value: object) -> str:
+    if type(value) is not np.ndarray:
+        raise TypeError("similarity must be exact numpy.ndarray")
+    if value.dtype != np.float64 or value.ndim != 2 or not np.isfinite(value).all():
+        raise EvaluationContractError("similarity must be finite float64 rank-2")
+    return _array_sha256(value, "<f8")
+
+
+def _hard_freeze_binding_bytes(value: object) -> bytes:
+    if type(value) is not HardGalleryFreezeBinding:
+        raise TypeError("freeze_binding must be exact HardGalleryFreezeBinding")
+    for name in (
+        "scorer_provenance_sha256",
+        "similarity_sha256",
+        "freeze_receipt_sha256",
+        "caption_manifest_sha256",
+        "motion_manifest_sha256",
+        "external_authorization_sha256",
+    ):
+        item = getattr(value, name)
+        if type(item) is not str or _LOWER_SHA256.fullmatch(item) is None:
+            raise EvaluationContractError(f"hard freeze binding {name} is invalid")
+    return (
+        json.dumps(
+            {
+                "caption_manifest_sha256": value.caption_manifest_sha256,
+                "external_authorization_sha256": value.external_authorization_sha256,
+                "freeze_receipt_sha256": value.freeze_receipt_sha256,
+                "motion_manifest_sha256": value.motion_manifest_sha256,
+                "schema": "phaseset-hard-gallery-freeze-binding-v1",
+                "scorer_provenance_sha256": value.scorer_provenance_sha256,
+                "similarity_sha256": value.similarity_sha256,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("ascii")
+        + b"\n"
+    )
+
+
+def hard_gallery_freeze_binding_sha256(value: object) -> str:
+    return hashlib.sha256(_hard_freeze_binding_bytes(value)).hexdigest()
 
 
 def _validate_hard_features(
@@ -401,6 +911,40 @@ def _validate_hard_features(
     invalid_power = power[~actor_mask]
     if invalid_power.size and (np.any(invalid_power != 0.0) or np.any(np.signbit(invalid_power))):
         raise EvaluationContractError("invalid actor band power must be exact +0.0")
+    similarity = _finite_vector(
+        value.frozen_text_similarity,
+        (caption_count, motion_count),
+        "frozen_text_similarity",
+        allow_negative=True,
+    )
+    evaluated_similarity = dataset.scores.T
+    same_full_rank = all(
+        tuple(
+            sorted(
+                range(motion_count),
+                key=lambda index: (
+                    -float(similarity[caption_index, index]),
+                    dataset.motion_commitments[index],
+                ),
+            )
+        )
+        == tuple(
+            sorted(
+                range(motion_count),
+                key=lambda index: (
+                    -float(evaluated_similarity[caption_index, index]),
+                    dataset.motion_commitments[index],
+                ),
+            )
+        )
+        for caption_index in range(caption_count)
+    )
+    if same_full_rank:
+        raise EvaluationContractError(
+            "hard-negative similarity cannot preserve the evaluated system's full ranking"
+        )
+    provenance = value.scorer_provenance
+    _hard_scorer_provenance_bytes(provenance)
     return HardNegativeFeatures(
         duration_seconds=_finite_vector(
             value.duration_seconds, (motion_count,), "duration_seconds"
@@ -413,12 +957,8 @@ def _validate_hard_features(
             "total_motion_energy",
         ),
         root_speed=_finite_vector(value.root_speed, (motion_count,), "root_speed"),
-        frozen_text_similarity=_finite_vector(
-            value.frozen_text_similarity,
-            (caption_count, motion_count),
-            "frozen_text_similarity",
-            allow_negative=True,
-        ),
+        frozen_text_similarity=similarity,
+        scorer_provenance=provenance,
     )
 
 
@@ -457,6 +997,7 @@ def _hard_gallery_digest(
     caption_index: int,
     motion_indices: tuple[int, ...],
     maximum_candidate_count: int,
+    selection_binding_sha256: str,
 ) -> str:
     positives = dataset.positive_motion_indices[caption_index]
     target_k = int(dataset.group_sizes[positives[0]])
@@ -468,9 +1009,64 @@ def _hard_gallery_digest(
         "positive_motion_commitments": sorted(
             dataset.motion_commitments[index].hex() for index in positives
         ),
+        "selection_binding_sha256": selection_binding_sha256,
         "target_k": target_k,
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("ascii")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _selection_binding_sha256(
+    dataset: RetrievalDataset,
+    features: HardNegativeFeatures,
+    config: HardGalleryConfig,
+    freeze_binding: HardGalleryFreezeBinding,
+) -> str:
+    scorer_raw = _hard_scorer_provenance_bytes(features.scorer_provenance)
+    payload = {
+        "actor_power_signature_sha256s": [
+            _array_sha256(signature, "<f8")
+            for signature in _actor_power_signatures(features)
+        ],
+        "band_power_log_linf_max_hex": config.band_power_log_linf_max.hex(),
+        "candidate_count": config.candidate_count,
+        "freeze_binding_sha256": hard_gallery_freeze_binding_sha256(freeze_binding),
+        "retrieval_census_sha256": retrieval_census_sha256(dataset),
+        "duration_absolute_max_hex": config.duration_absolute_max.hex(),
+        "duration_sha256": _array_sha256(features.duration_seconds, "<f8"),
+        "motion_energy_sha256": _array_sha256(features.total_motion_energy, "<f8"),
+        "root_speed_log_max_hex": config.root_speed_log_max.hex(),
+        "root_speed_sha256": _array_sha256(features.root_speed, "<f8"),
+        "schema": "phaseset-hard-gallery-selection-binding-v1",
+        "scorer_provenance_sha256": hashlib.sha256(scorer_raw).hexdigest(),
+        "similarity_sha256": hard_negative_similarity_sha256(
+            features.frozen_text_similarity
+        ),
+        "total_energy_log_max_hex": config.total_energy_log_max.hex(),
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("ascii")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _hard_collection_digest(
+    retrieval_census_sha256_value: str,
+    scorer_provenance_sha256: str,
+    freeze_binding_sha256: str,
+    selection_binding_sha256: str,
+    galleries: tuple[HardGallery, ...],
+) -> str:
+    raw = json.dumps(
+        {
+            "freeze_binding_sha256": freeze_binding_sha256,
+            "domain": "phaseset-group-hard-collection-v2",
+            "gallery_sha256": [gallery.gallery_sha256 for gallery in galleries],
+            "scorer_provenance_sha256": scorer_provenance_sha256,
+            "retrieval_census_sha256": retrieval_census_sha256_value,
+            "selection_binding_sha256": selection_binding_sha256,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("ascii")
     return hashlib.sha256(raw).hexdigest()
 
 
@@ -478,13 +1074,40 @@ def build_group_hard_galleries(
     dataset_value: object,
     features_value: object,
     config_value: object,
-) -> tuple[HardGallery, ...]:
+    freeze_binding_value: object,
+) -> HardGalleryCollection:
     """Build exact-K, caliper-matched hard galleries without fallback."""
 
     dataset = validate_retrieval_dataset(dataset_value)
     features = _validate_hard_features(dataset, features_value)
     config = _validate_hard_config(config_value)
+    if type(freeze_binding_value) is not HardGalleryFreezeBinding:
+        raise TypeError("freeze_binding must be exact HardGalleryFreezeBinding")
+    freeze_binding = freeze_binding_value
+    _hard_freeze_binding_bytes(freeze_binding)
+    scorer_provenance = features.scorer_provenance
+    if (
+        freeze_binding.scorer_provenance_sha256
+        != hard_negative_scorer_provenance_sha256(scorer_provenance)
+        or freeze_binding.similarity_sha256
+        != hard_negative_similarity_sha256(features.frozen_text_similarity)
+        or freeze_binding.freeze_receipt_sha256
+        != scorer_provenance.freeze_receipt_sha256
+        or freeze_binding.caption_manifest_sha256
+        != scorer_provenance.caption_manifest_sha256
+        or freeze_binding.motion_manifest_sha256
+        != scorer_provenance.motion_manifest_sha256
+    ):
+        raise EvaluationContractError(
+            "hard-gallery inputs differ from the externally frozen expected binding"
+        )
     output: list[HardGallery] = []
+    selection_binding_sha256 = _selection_binding_sha256(
+        dataset,
+        features,
+        config,
+        freeze_binding,
+    )
     power_signatures = _actor_power_signatures(features)
     log_energy = np.log1p(features.total_motion_energy)
     log_speed = np.log1p(features.root_speed)
@@ -557,18 +1180,38 @@ def build_group_hard_galleries(
                     caption_index=caption_index,
                     motion_indices=selected,
                     maximum_candidate_count=config.candidate_count,
+                    selection_binding_sha256=selection_binding_sha256,
                 ),
             )
         )
-    return tuple(output)
+    galleries = tuple(output)
+    scorer_provenance_sha256 = hashlib.sha256(
+        _hard_scorer_provenance_bytes(features.scorer_provenance)
+    ).hexdigest()
+    census_sha256 = retrieval_census_sha256(dataset)
+    freeze_binding_sha256 = hard_gallery_freeze_binding_sha256(freeze_binding)
+    return HardGalleryCollection(
+        galleries=galleries,
+        scorer_provenance=features.scorer_provenance,
+        freeze_binding=freeze_binding,
+        selection_binding_sha256=selection_binding_sha256,
+        retrieval_census_sha256=census_sha256,
+        collection_sha256=_hard_collection_digest(
+            census_sha256,
+            scorer_provenance_sha256,
+            freeze_binding_sha256,
+            selection_binding_sha256,
+            galleries,
+        ),
+    )
 
 
 def evaluate_hard_text_to_motion(
     dataset_value: object,
-    galleries_value: object,
+    collection_value: object,
 ) -> DirectionMetrics:
     dataset = validate_retrieval_dataset(dataset_value)
-    galleries = _validated_hard_galleries(dataset, galleries_value)
+    galleries = _validated_hard_collection(dataset, collection_value).galleries
     ranks: list[int] = []
     for caption_index, gallery in enumerate(galleries):
         positives = set(dataset.positive_motion_indices[caption_index])
@@ -580,12 +1223,18 @@ def evaluate_hard_text_to_motion(
             ),
         )
         ranks.append(min(ordered.index(index) + 1 for index in positives))
-    return _metrics(np.asarray(ranks, dtype=np.int64))
+    clusters = _capture_clusters(dataset)
+    return _metrics(
+        np.asarray(ranks, dtype=np.int64),
+        tuple(cluster.caption_indices for cluster in clusters),
+    )
 
 
 def _validated_hard_galleries(
     dataset: RetrievalDataset,
     value: object,
+    *,
+    selection_binding_sha256: str,
 ) -> tuple[HardGallery, ...]:
     if type(value) is not tuple or len(value) != dataset.scores.shape[1]:
         raise EvaluationContractError("hard galleries must contain one row per caption")
@@ -634,37 +1283,79 @@ def _validated_hard_galleries(
             caption_index=caption_index,
             motion_indices=candidates,
             maximum_candidate_count=gallery.maximum_candidate_count,
+            selection_binding_sha256=selection_binding_sha256,
         )
         if type(gallery.gallery_sha256) is not str or gallery.gallery_sha256 != expected_digest:
             raise EvaluationContractError("hard gallery digest does not match its lineage")
     return value
 
 
+def _validated_hard_collection(
+    dataset: RetrievalDataset,
+    value: object,
+) -> HardGalleryCollection:
+    if type(value) is not HardGalleryCollection:
+        raise TypeError("hard gallery collection must be exact HardGalleryCollection")
+    census_sha256 = retrieval_census_sha256(dataset)
+    if value.retrieval_census_sha256 != census_sha256:
+        raise EvaluationContractError("hard gallery collection query census differs")
+    if (
+        type(value.selection_binding_sha256) is not str
+        or _LOWER_SHA256.fullmatch(value.selection_binding_sha256) is None
+    ):
+        raise EvaluationContractError("hard gallery selection binding is invalid")
+    scorer_raw = _hard_scorer_provenance_bytes(value.scorer_provenance)
+    scorer_provenance_sha256 = hashlib.sha256(scorer_raw).hexdigest()
+    freeze_binding_raw = _hard_freeze_binding_bytes(value.freeze_binding)
+    freeze_binding_sha256 = hashlib.sha256(freeze_binding_raw).hexdigest()
+    if (
+        value.freeze_binding.scorer_provenance_sha256 != scorer_provenance_sha256
+        or value.freeze_binding.freeze_receipt_sha256
+        != value.scorer_provenance.freeze_receipt_sha256
+        or value.freeze_binding.caption_manifest_sha256
+        != value.scorer_provenance.caption_manifest_sha256
+        or value.freeze_binding.motion_manifest_sha256
+        != value.scorer_provenance.motion_manifest_sha256
+    ):
+        raise EvaluationContractError(
+            "hard gallery collection freeze binding differs from scorer provenance"
+        )
+    galleries = _validated_hard_galleries(
+        dataset,
+        value.galleries,
+        selection_binding_sha256=value.selection_binding_sha256,
+    )
+    expected_collection_sha256 = _hard_collection_digest(
+        census_sha256,
+        scorer_provenance_sha256,
+        freeze_binding_sha256,
+        value.selection_binding_sha256,
+        galleries,
+    )
+    if value.collection_sha256 != expected_collection_sha256:
+        raise EvaluationContractError("hard gallery collection digest does not match lineage")
+    return value
+
+
 def hard_gallery_collection_sha256(
     dataset_value: object,
-    galleries_value: object,
+    collection_value: object,
 ) -> str:
     """Return a public-safe digest without exposing indices or commitments."""
 
     dataset = validate_retrieval_dataset(dataset_value)
-    galleries = _validated_hard_galleries(dataset, galleries_value)
-    payload = {
-        "dataset_sha256": _dataset_digest(dataset),
-        "domain": "phaseset-group-hard-collection-v1",
-        "gallery_sha256": [gallery.gallery_sha256 for gallery in galleries],
-    }
-    raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("ascii")
-    return hashlib.sha256(raw).hexdigest()
+    collection = _validated_hard_collection(dataset, collection_value)
+    return collection.collection_sha256
 
 
 def count_only_chance_recall_at_1(
     dataset_value: object,
-    galleries_value: object,
+    collection_value: object,
 ) -> float:
     """Analytical random-tie R@1 for a K-matched count-only diagnostic."""
 
     dataset = validate_retrieval_dataset(dataset_value)
-    galleries = _validated_hard_galleries(dataset, galleries_value)
+    galleries = _validated_hard_collection(dataset, collection_value).galleries
     probabilities = [
         len(dataset.positive_motion_indices[caption_index]) / len(gallery.motion_indices)
         for caption_index, gallery in enumerate(galleries)
@@ -688,11 +1379,14 @@ def count_only_scores(dataset_value: object) -> np.ndarray:
 
 def assert_count_only_non_discriminative(
     dataset_value: object,
-    galleries: Iterable[HardGallery],
+    collection_value: object,
 ) -> None:
     dataset = validate_retrieval_dataset(dataset_value)
     scores = count_only_scores(dataset)
-    frozen_galleries = _validated_hard_galleries(dataset, tuple(galleries))
+    frozen_galleries = _validated_hard_collection(
+        dataset,
+        collection_value,
+    ).galleries
     for gallery in frozen_galleries:
         values = scores[list(gallery.motion_indices), gallery.caption_index]
         if not np.all(values == values[0]):
@@ -701,19 +1395,30 @@ def assert_count_only_non_discriminative(
 
 __all__ = [
     "BidirectionalMetrics",
+    "CaptureR1Contribution",
     "DirectionMetrics",
     "EvaluationContractError",
     "EvaluationReport",
     "HardGallery",
+    "HardGalleryCollection",
     "HardGalleryConfig",
+    "HardGalleryFreezeBinding",
     "HardNegativeFeatures",
+    "HardNegativeScorerProvenance",
     "RetrievalDataset",
     "assert_count_only_non_discriminative",
     "build_group_hard_galleries",
+    "canonical_evaluation_report_bytes",
+    "capture_r1_contributions",
+    "capture_cluster_commitments",
     "count_only_chance_recall_at_1",
     "count_only_scores",
     "evaluate_hard_text_to_motion",
     "evaluate_retrieval",
     "hard_gallery_collection_sha256",
+    "hard_gallery_freeze_binding_sha256",
+    "hard_negative_scorer_provenance_sha256",
+    "hard_negative_similarity_sha256",
+    "retrieval_census_sha256",
     "validate_retrieval_dataset",
 ]

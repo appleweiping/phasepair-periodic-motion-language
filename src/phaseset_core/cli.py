@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import json
 from pathlib import Path
 import sys
-from typing import Sequence, TextIO
+from typing import Protocol, Sequence, TextIO
 
 from phaseset_core.execution import (
     AUTHORITY,
@@ -22,6 +23,7 @@ from phaseset_core.execution import (
     canonical_runtime_admission_bytes,
     load_training_config,
 )
+from phaseset_core.experiments import BASE_SYSTEMS, FINAL_SYSTEMS, SEEDS, parse_run_id
 
 
 EXIT_OK = 0
@@ -29,6 +31,101 @@ EXIT_USAGE_OR_CONTRACT = 2
 EXIT_HOLD = 3
 EXIT_EXECUTION_FAILED = 4
 _DEFAULT_CONFIG = Path(__file__).resolve().parents[2] / "configs" / "phaseset" / "training.json"
+_BASE_SYSTEM_IDS = tuple(system_id for system_id, _ in BASE_SYSTEMS)
+_FINAL_SYSTEM_IDS = tuple(system_id for system_id, _ in FINAL_SYSTEMS)
+_RESIDUAL_SYSTEM_IDS = tuple(system_id for system_id in _FINAL_SYSTEM_IDS if system_id != "00")
+
+
+@dataclass(frozen=True, slots=True)
+class CLICommandRequest:
+    """Private, in-process command parameters passed to a trusted adapter factory.
+
+    This object is deliberately not serializable by the public CLI. Paths may
+    identify private data or execution state, so they are delivered only to a
+    host-injected factory and can never appear in stdout, stderr, admission
+    JSON, or command-result JSON.
+    """
+
+    command: str
+    run_id: str | None = None
+    seed: int | None = None
+    split: str | None = None
+    system_id: str | None = None
+    source_manifest: Path | None = None
+    prepared_root: Path | None = None
+    split_manifest: Path | None = None
+    terminal_root: Path | None = None
+    base_checkpoint: Path | None = None
+    periodic_cache: Path | None = None
+    cache_root: Path | None = None
+    checkpoint_directory: Path | None = None
+    resume_checkpoint: Path | None = None
+    stop_after_global_step: int | None = None
+    evaluation_manifest: Path | None = None
+    statistical_report: Path | None = None
+    attempt_directory: Path | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.command) is not str or self.command not in COMMANDS:
+            raise ExecutionContractError("CLI command request is outside the closed census")
+        for name in (
+            "source_manifest",
+            "prepared_root",
+            "split_manifest",
+            "terminal_root",
+            "base_checkpoint",
+            "periodic_cache",
+            "cache_root",
+            "checkpoint_directory",
+            "resume_checkpoint",
+            "evaluation_manifest",
+            "statistical_report",
+            "attempt_directory",
+        ):
+            value = getattr(self, name)
+            if value is not None and not isinstance(value, Path):
+                raise TypeError(f"{name} must be a pathlib.Path")
+        if self.stop_after_global_step is not None and (
+            type(self.stop_after_global_step) is not int or self.stop_after_global_step < 0
+        ):
+            raise ExecutionContractError("stop_after_global_step must be nonnegative")
+
+    @property
+    def carries_factory_only_parameters(self) -> bool:
+        """Whether a legacy already-built adapter would silently lose input."""
+
+        path_values = (
+            self.source_manifest,
+            self.prepared_root,
+            self.split_manifest,
+            self.terminal_root,
+            self.base_checkpoint,
+            self.periodic_cache,
+            self.cache_root,
+            self.checkpoint_directory,
+            self.resume_checkpoint,
+            self.evaluation_manifest,
+            self.statistical_report,
+            self.attempt_directory,
+        )
+        return (
+            any(value is not None for value in path_values)
+            or self.stop_after_global_step is not None
+            or (self.command in {"evaluate", "resume"} and self.system_id is not None)
+        )
+
+
+class RuntimeAdapterFactory(Protocol):
+    """Trusted host seam binding parsed CLI parameters to one runtime adapter.
+
+    A production host normally constructs a request-specific private backend,
+    authenticates its receipt assertions, and returns a
+    ``ProductionRuntimeAdapter``. The public executable never imports a backend
+    from a path, endpoint, environment variable, or command-line string.
+    """
+
+    def __call__(self, request: CLICommandRequest) -> RuntimeAdapter:
+        """Return the adapter bound to exactly this in-process request."""
 
 
 def _canonical_bytes(value: object) -> bytes:
@@ -53,6 +150,25 @@ def _add_config(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_training_checkpoint_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--checkpoint-dir",
+        dest="checkpoint_directory",
+        type=Path,
+        help="private immutable checkpoint output directory (factory-only)",
+    )
+    parser.add_argument(
+        "--resume-checkpoint",
+        type=Path,
+        help="private checkpoint to resume after backend verification (factory-only)",
+    )
+    parser.add_argument(
+        "--stop-after-global-step",
+        type=int,
+        help="controlled interruption point used by the checkpoint/resume runtime",
+    )
+
+
 def _load_cli_config(path: Path) -> bytes:
     try:
         return load_training_config(path)
@@ -60,6 +176,44 @@ def _load_cli_config(path: Path) -> bytes:
         if path == _DEFAULT_CONFIG:
             return canonical_public_training_config_bytes()
         raise
+
+
+def _build_command_request(namespace: argparse.Namespace) -> CLICommandRequest:
+    command = namespace.command
+    run_id = getattr(namespace, "run_id", None)
+    seed = getattr(namespace, "seed", None)
+    split = getattr(namespace, "split", None)
+    system_id = getattr(namespace, "system_id", None)
+    if command in {"run-base", "run-residual"}:
+        role, _, derived_system_id = parse_run_id(run_id)
+        expected_role = "BASE_QUALIFICATION" if command == "run-base" else "RESIDUAL_TRAIN"
+        if role != expected_role:
+            raise ExecutionContractError("run_id role does not match the CLI command")
+        if system_id is not None and system_id != derived_system_id:
+            raise ExecutionContractError("explicit system_id differs from run_id")
+        system_id = derived_system_id
+    elif command == "build-periodic-cache" and seed not in SEEDS:
+        raise ExecutionContractError("periodic cache seed is outside the frozen census")
+    return CLICommandRequest(
+        command=command,
+        run_id=run_id,
+        seed=seed,
+        split=split,
+        system_id=system_id,
+        source_manifest=getattr(namespace, "source_manifest", None),
+        prepared_root=getattr(namespace, "prepared_root", None),
+        split_manifest=getattr(namespace, "split_manifest", None),
+        terminal_root=getattr(namespace, "terminal_root", None),
+        base_checkpoint=getattr(namespace, "base_checkpoint", None),
+        periodic_cache=getattr(namespace, "periodic_cache", None),
+        cache_root=getattr(namespace, "cache_root", None),
+        checkpoint_directory=getattr(namespace, "checkpoint_directory", None),
+        resume_checkpoint=getattr(namespace, "resume_checkpoint", None),
+        stop_after_global_step=getattr(namespace, "stop_after_global_step", None),
+        evaluation_manifest=getattr(namespace, "evaluation_manifest", None),
+        statistical_report=getattr(namespace, "statistical_report", None),
+        attempt_directory=getattr(namespace, "attempt_dir", None),
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -86,6 +240,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_base = subparsers.add_parser("run-base", help="request one registered base run")
     _add_config(run_base)
     run_base.add_argument("--run-id", required=True)
+    run_base.add_argument("--system-id", choices=_BASE_SYSTEM_IDS)
+    _add_training_checkpoint_options(run_base)
 
     qualify = subparsers.add_parser("qualify-base", help="qualify all nine base terminals")
     _add_config(qualify)
@@ -96,16 +252,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_config(cache)
     cache.add_argument("--seed", required=True, type=int)
+    cache.add_argument("--base-checkpoint", type=Path)
+    cache.add_argument("--cache-root", type=Path)
 
     residual = subparsers.add_parser("run-residual", help="request one registered residual run")
     _add_config(residual)
     residual.add_argument("--run-id", required=True)
+    residual.add_argument("--system-id", choices=_RESIDUAL_SYSTEM_IDS)
+    residual.add_argument("--base-checkpoint", type=Path)
+    residual.add_argument("--periodic-cache", type=Path)
+    _add_training_checkpoint_options(residual)
 
     evaluate = subparsers.add_parser(
         "evaluate", help="request validation or sealed-test evaluation"
     )
     _add_config(evaluate)
     evaluate.add_argument("--split", required=True, choices=("validation", "test"))
+    evaluate.add_argument("--system-id", choices=_FINAL_SYSTEM_IDS)
     evaluate.add_argument("--terminal-root", type=Path)
 
     bootstrap = subparsers.add_parser(
@@ -123,6 +286,8 @@ def build_parser() -> argparse.ArgumentParser:
     resume = subparsers.add_parser("resume", help="request a new attempt from a checkpoint")
     _add_config(resume)
     resume.add_argument("--attempt-dir", type=Path)
+    resume.add_argument("--checkpoint", dest="resume_checkpoint", type=Path)
+    resume.add_argument("--system-id", choices=_FINAL_SYSTEM_IDS)
 
     return parser
 
@@ -167,8 +332,16 @@ def main(
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
     runtime_adapter: RuntimeAdapter | None = None,
+    runtime_adapter_factory: RuntimeAdapterFactory | None = None,
 ) -> int:
-    """Parse one command, emit canonical JSON, and never perform external I/O."""
+    """Parse one command and dispatch only through an injected, admitted runtime.
+
+    ``runtime_adapter`` remains the compatibility seam for path-free adapters.
+    Hosts that need private paths, a system selection, or checkpoint/resume
+    controls must inject ``runtime_adapter_factory`` so the parsed request is
+    actually bound before admission. The normal installed CLI supplies neither
+    seam and therefore remains authority zero and held.
+    """
 
     output = sys.stdout if stdout is None else stdout
     errors = sys.stderr if stderr is None else stderr
@@ -183,8 +356,20 @@ def main(
         _emit(_contract_error_bytes(str(command), "COMMAND_OUTSIDE_CENSUS"), errors)
         return EXIT_USAGE_OR_CONTRACT
     try:
+        request = _build_command_request(namespace)
+        if runtime_adapter is not None and runtime_adapter_factory is not None:
+            raise ExecutionContractError("only one runtime injection seam may be used")
         config_raw = _load_cli_config(namespace.config)
-        runner = DataFreeRunner(config_raw, runtime_adapter=runtime_adapter)
+        selected_adapter = runtime_adapter
+        if runtime_adapter_factory is not None:
+            if not callable(runtime_adapter_factory):
+                raise TypeError("runtime_adapter_factory must be callable")
+            selected_adapter = runtime_adapter_factory(request)
+        elif runtime_adapter is not None and request.carries_factory_only_parameters:
+            raise ExecutionContractError(
+                "private CLI parameters require a request-aware runtime adapter factory"
+            )
+        runner = DataFreeRunner(config_raw, runtime_adapter=selected_adapter)
         if command == "preflight":
             report = runner.preflight()
             if type(report) is RuntimeAdmission:
@@ -227,9 +412,11 @@ if __name__ == "__main__":  # pragma: no cover - exercised through main in tests
 
 
 __all__ = [
+    "CLICommandRequest",
     "EXIT_HOLD",
     "EXIT_OK",
     "EXIT_USAGE_OR_CONTRACT",
+    "RuntimeAdapterFactory",
     "build_parser",
     "main",
 ]

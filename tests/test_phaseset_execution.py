@@ -15,6 +15,31 @@ ROOT = Path(__file__).resolve().parents[1]
 DIGESTS = tuple(character * 64 for character in "abcdef1234567890")
 
 
+def _paired_capture(
+    label: str,
+    treatment_text: tuple[int, ...],
+    control_text: tuple[int, ...],
+    treatment_motion: tuple[int, ...] = (1,),
+    control_motion: tuple[int, ...] = (0,),
+) -> statistics.PairedCapture:
+    identity = lambda domain, ordinal: hashlib.sha256(  # noqa: E731
+        f"{label}-{domain}-{ordinal}".encode("ascii")
+    ).hexdigest()
+    return statistics.PairedCapture(
+        capture_id=identity("capture", 0),
+        caption_ids=tuple(
+            sorted(identity("caption", ordinal) for ordinal in range(len(treatment_text)))
+        ),
+        motion_ids=tuple(
+            sorted(identity("motion", ordinal) for ordinal in range(len(treatment_motion)))
+        ),
+        treatment_text_to_motion_hits=treatment_text,
+        control_text_to_motion_hits=control_text,
+        treatment_motion_to_text_hits=treatment_motion,
+        control_motion_to_text_hits=control_motion,
+    )
+
+
 def _attempt(attempt_id: str = "attempt-0001") -> execution.AttemptRecord:
     return execution.AttemptRecord(
         attempt_id=attempt_id,
@@ -41,6 +66,7 @@ def _checkpoint(parent: str | None = None, step: int = 10) -> execution.Checkpoi
         dataloader_state_sha256=DIGESTS[8],
         dropout_state_sha256=DIGESTS[9],
         validation_state_sha256=DIGESTS[10],
+        checkpoint_payload_sha256=DIGESTS[11],
         parent_checkpoint_receipt_sha256=parent,
     )
 
@@ -106,6 +132,93 @@ def test_checkpoint_parent_and_step_cannot_be_forged(tmp_path: Path) -> None:
     assert store.write_checkpoint(_checkpoint(parent=first_sha, step=20))
 
 
+def test_open_revalidates_existing_heartbeat_chain(tmp_path: Path) -> None:
+    store = execution.AttemptStore.create(tmp_path, _attempt())
+    first = execution.HeartbeatRecord(
+        attempt_id=store.attempt.attempt_id,
+        run_id=store.attempt.run_id,
+        sequence=0,
+        global_step=0,
+        observed_at_utc="2026-08-25T20:01:00Z",
+        phase="STARTING",
+        previous_heartbeat_sha256=None,
+    )
+    first_sha = store.write_heartbeat(first)
+    store.write_heartbeat(
+        execution.HeartbeatRecord(
+            attempt_id=store.attempt.attempt_id,
+            run_id=store.attempt.run_id,
+            sequence=1,
+            global_step=1,
+            observed_at_utc="2026-08-25T20:01:01Z",
+            phase="RUNNING",
+            previous_heartbeat_sha256=first_sha,
+        )
+    )
+    execution.AttemptStore.open(tmp_path, store.attempt.attempt_id)
+    first_path = store.path / "heartbeats" / "heartbeat-00000000.json"
+    first_path.write_bytes(
+        execution.canonical_heartbeat_bytes(replace(first, phase="RUNNING"))
+    )
+    with pytest.raises(execution.ExecutionContractError, match="predecessor digest"):
+        execution.AttemptStore.open(tmp_path, store.attempt.attempt_id)
+
+
+def test_resume_payload_binding_revalidates_recursive_predecessor_chain(
+    tmp_path: Path,
+) -> None:
+    predecessor = execution.AttemptStore.create(tmp_path, _attempt())
+    first_sha = predecessor.write_checkpoint(_checkpoint(step=10))
+    latest = replace(
+        _checkpoint(parent=first_sha, step=20),
+        checkpoint_payload_sha256=DIGESTS[12],
+    )
+    latest_sha = predecessor.write_checkpoint(latest)
+    terminal_sha = predecessor.write_terminal(
+        execution.TerminalRecord(
+            attempt_id=predecessor.attempt.attempt_id,
+            run_id=predecessor.attempt.run_id,
+            completed_at_utc="2026-08-25T20:03:00Z",
+            outcome="FAILED",
+            attempt_receipt_sha256=execution.artifact_sha256(
+                (predecessor.path / "attempt.json").read_bytes()
+            ),
+            latest_heartbeat_sha256=None,
+            latest_checkpoint_receipt_sha256=latest_sha,
+            failure_code="INFRA_TRANSIENT",
+        )
+    )
+    new_attempt = replace(
+        predecessor.attempt,
+        attempt_id="attempt-0002",
+        created_at_utc="2026-08-25T20:04:00Z",
+    )
+    resume = execution.ResumeRecord(
+        new_attempt_id=new_attempt.attempt_id,
+        predecessor_attempt_id=predecessor.attempt.attempt_id,
+        run_id=new_attempt.run_id,
+        created_at_utc=new_attempt.created_at_utc,
+        predecessor_terminal_sha256=terminal_sha,
+        checkpoint_receipt_sha256=latest_sha,
+        corrective_change_sha256=DIGESTS[13],
+        retry_class="INFRA_TRANSIENT",
+    )
+    execution.AttemptStore.create_resumed(tmp_path, new_attempt, resume)
+    assert (
+        execution.verified_resume_checkpoint_payload_sha256(tmp_path, resume)
+        == DIGESTS[12]
+    )
+
+    first_path = predecessor.path / "checkpoints" / "checkpoint-000000000010.json"
+    first_path.write_bytes(
+        execution.canonical_checkpoint_bytes(
+            replace(_checkpoint(step=10), checkpoint_payload_sha256=DIGESTS[14])
+        )
+    )
+    with pytest.raises(execution.ExecutionContractError, match="parent digest"):
+        execution.verified_resume_checkpoint_payload_sha256(tmp_path, resume)
+
+
 @pytest.mark.parametrize("attempt_id", ("../escape", "a/b", "A", "space value", ""))
 def test_attempt_id_rejects_path_and_noncanonical_values(tmp_path: Path, attempt_id: str) -> None:
     with pytest.raises(execution.ExecutionContractError):
@@ -119,7 +232,13 @@ def test_sealed_test_consumption_is_single_use_and_not_external_authority(
     receipt_sha = gate.consume(
         external_grant_sha256=DIGESTS[0],
         test_manifest_sha256=DIGESTS[1],
+        caption_manifest_sha256=DIGESTS[5],
         evaluator_sha256=DIGESTS[2],
+        validation_freeze_sha256=DIGESTS[3],
+        aggregate_code_sha256=DIGESTS[4],
+        evaluation_census_sha256=DIGESTS[6],
+        hard_gallery_freeze_binding_sha256=DIGESTS[7],
+        hard_gallery_collection_sha256=DIGESTS[8],
         consumed_at_utc="2026-08-25T21:00:00Z",
     )
     assert len(receipt_sha) == 64
@@ -130,7 +249,13 @@ def test_sealed_test_consumption_is_single_use_and_not_external_authority(
         gate.consume(
             external_grant_sha256=DIGESTS[0],
             test_manifest_sha256=DIGESTS[1],
+            caption_manifest_sha256=DIGESTS[5],
             evaluator_sha256=DIGESTS[2],
+            validation_freeze_sha256=DIGESTS[3],
+            aggregate_code_sha256=DIGESTS[4],
+            evaluation_census_sha256=DIGESTS[6],
+            hard_gallery_freeze_binding_sha256=DIGESTS[7],
+            hard_gallery_collection_sha256=DIGESTS[8],
             consumed_at_utc="2026-08-25T21:01:00Z",
         )
 
@@ -419,6 +544,9 @@ class _SyntheticPipelineAdapter:
             dataloader_state_sha256=_synthetic_digest(f"loader-{attempt_id}"),
             dropout_state_sha256=_synthetic_digest(f"dropout-{attempt_id}"),
             validation_state_sha256=_synthetic_digest(f"validation-{attempt_id}"),
+            checkpoint_payload_sha256=_synthetic_digest(
+                f"checkpoint-payload-{attempt_id}"
+            ),
             parent_checkpoint_receipt_sha256=None,
         )
 
@@ -514,6 +642,12 @@ class _SyntheticPipelineAdapter:
                 parameter_count=parameters[experiments.parse_run_id(run_id)[2]],
                 frozen_runtime_latency_ns=latencies[experiments.parse_run_id(run_id)[2]],
                 terminal_sha256=_synthetic_digest(f"terminal-{run_id}"),
+                selected_checkpoint_sha256=_synthetic_digest(f"checkpoint-{run_id}"),
+                split="validation",
+                validation_manifest_sha256=_synthetic_digest("base-validation-manifest"),
+                query_census_sha256=_synthetic_digest("base-validation-census"),
+                evaluator_sha256=_synthetic_digest("base-evaluator"),
+                score_artifact_sha256=_synthetic_digest(f"base-score-{run_id}"),
             )
             for run_id in experiments.base_run_ids()
         )
@@ -657,9 +791,9 @@ class _SyntheticPipelineAdapter:
             },
         )
         self.captures = (
-            statistics.PairedCapture("synthetic-a", (1,), (0,)),
-            statistics.PairedCapture("synthetic-b", (1, 0), (0, 0)),
-            statistics.PairedCapture("synthetic-c", (1, 1, 0), (1, 0, 0)),
+            _paired_capture("synthetic-a", (1,), (0,)),
+            _paired_capture("synthetic-b", (1, 0), (0, 0)),
+            _paired_capture("synthetic-c", (1, 1, 0), (1, 0, 0), (0,), (0,)),
         )
         return self._result(intent, "COMPLETED", digest)
 

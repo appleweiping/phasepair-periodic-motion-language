@@ -10,6 +10,7 @@ import pytest
 from phasepair_core import signal as legacy_signal
 from phaseset_core.contracts import PreparedActivityBatch, group_commitment
 from phaseset_core.periodic import (
+    DEFAULT_EDGE_CHUNK_SIZE,
     PeriodicContractError,
     ResourceLimitError,
     iter_unordered_pair_chunks,
@@ -99,6 +100,100 @@ def test_stream_is_chunk_size_invariant_and_obeys_directional_swap_laws() -> Non
     assert np.array_equal(tokens_ij[..., 4], -tokens_ji[..., 4])
     assert np.array_equal(tokens_ij[..., 5], -tokens_ji[..., 5])
     assert np.array_equal(tokens_ij[..., 6:], tokens_ji[..., 6:])
+
+
+def test_known_delay_changes_only_edges_incident_to_the_delayed_actor() -> None:
+    actor_count = 4
+    valid_length = 200
+    padded_time = valid_length + 1
+    grid = np.arange(valid_length, dtype=np.float64)
+    activities = np.zeros((1, actor_count, padded_time, 5), dtype=np.float32)
+    for actor in range(actor_count):
+        for channel in range(5):
+            activities[0, actor, :valid_length, channel] = np.sin(
+                2.0
+                * np.pi
+                * (1.6875 + 0.03125 * channel)
+                * grid
+                / 20.0
+                + 0.23 * actor
+                + 0.07 * channel
+            ).astype(np.float32)
+    actor_mask = np.ones((1, actor_count), dtype=np.bool_)
+    frame_mask = np.zeros((1, padded_time), dtype=np.bool_)
+    frame_mask[:, :valid_length] = True
+    activity_mask = np.zeros_like(activities, dtype=np.bool_)
+    activity_mask[:, :, :valid_length] = True
+    keys = tuple(_key(index) for index in range(actor_count))
+
+    original = PreparedActivityBatch(
+        np.ascontiguousarray(activities),
+        actor_mask,
+        frame_mask,
+        activity_mask,
+        (keys,),
+        (group_commitment(keys),),
+    )
+    delayed_values = np.array(activities, copy=True, order="C")
+    delayed_values[0, 1, :valid_length] = np.roll(
+        delayed_values[0, 1, :valid_length],
+        shift=3,
+        axis=0,
+    )
+    delayed = PreparedActivityBatch(
+        delayed_values,
+        actor_mask,
+        frame_mask,
+        activity_mask,
+        (keys,),
+        (group_commitment(keys),),
+    )
+
+    before = _flatten(original, 64)
+    after = _flatten(delayed, 64)
+    assert np.array_equal(before[1], after[1])
+    assert np.array_equal(before[2], after[2])
+    delayed_canonical_actor = sorted(keys).index(keys[1])
+    for edge_index, (left, right) in enumerate(
+        zip(before[1].tolist(), before[2].tolist(), strict=True)
+    ):
+        incident = delayed_canonical_actor in (left, right)
+        if incident:
+            assert not np.array_equal(before[3][edge_index], after[3][edge_index])
+            assert not np.array_equal(before[4][edge_index], after[4][edge_index])
+        else:
+            assert np.array_equal(before[3][edge_index], after[3][edge_index])
+            assert np.array_equal(before[4][edge_index], after[4][edge_index])
+            assert np.array_equal(before[5][edge_index], after[5][edge_index])
+
+
+def test_default_runtime_chunk_is_exactly_explicit_256() -> None:
+    assert DEFAULT_EDGE_CHUNK_SIZE == 256
+    batch = _batch(24)
+    default_chunks = list(
+        iter_unordered_pair_chunks(
+            batch,
+            energy_floors=np.zeros((6,), dtype=np.float64),
+        )
+    )
+    explicit_chunks = list(
+        iter_unordered_pair_chunks(
+            batch,
+            energy_floors=np.zeros((6,), dtype=np.float64),
+            edge_chunk_size=256,
+        )
+    )
+    assert [chunk.batch_indices.shape[0] for chunk in default_chunks] == [256, 20]
+    for default, explicit in zip(default_chunks, explicit_chunks, strict=True):
+        for field in (
+            "batch_indices",
+            "actor_i",
+            "actor_j",
+            "tokens_ij",
+            "tokens_ji",
+            "support_mask",
+        ):
+            assert np.array_equal(getattr(default, field), getattr(explicit, field))
 
 
 def test_two_actor_wrapper_uses_phaseset_20hz_support_and_legacy_13d_layout() -> None:
