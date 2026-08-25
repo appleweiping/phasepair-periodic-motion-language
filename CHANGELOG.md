@@ -21,6 +21,10 @@ has been issued.
 - Windows Python 3.12/3.14 exact-runtime CI, an Ubuntu portability audit/wheel
   lane, a fail-closed public-tree audit, and a deterministic tracked-file
   checksum manifest.
+- Authority-consistent release tooling that audits Git-index blobs in a
+  checkout and the complete manifest-bound file set in a GitHub codeload ZIP,
+  with regression coverage for tampering, extra files, parent-repository
+  attachment, and unstaged worktree masking.
 - B0 annotation/caption technical closure receipts with the remaining human
   license/release decisions stated explicitly.
 - No-result paper source, editable method/protocol slide source, project status,

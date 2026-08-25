@@ -118,12 +118,22 @@ development environment can run:
 ```powershell
 python -B -m pytest -p no:cacheprovider -q
 python -B -m ruff check --no-cache src tests
+python -B scripts/release_manifest.py verify
+python -B scripts/public_release_audit.py
+python -B scripts/check_local_links.py
 ```
+
+The three release checks use Git-index paths and blob bytes in an exact Git
+checkout. In a GitHub codeload ZIP, they instead require
+`RELEASE_FILES.sha256` to match the complete regular-file set, byte counts,
+and SHA-256 digests before auditing content or links. They reject an empty,
+tampered, incomplete, or extra-file archive instead of reporting a vacuous
+pass.
 
 The current public working tree was verified on 2026-08-25 on Windows x86-64
 with CPython 3.14.5:
-`568 passed, 3 skipped, 36 subtests passed`, followed by a clean Ruff run. Its
-CPython 3.12 lane passed `567` tests with `3` platform/private-runtime skips and
+`571 passed, 3 skipped, 36 subtests passed`, followed by a clean Ruff run. Its
+CPython 3.12 lane passed `570` tests with `3` platform/private-runtime skips and
 one deliberate deselection of the test that asserts the exact 3.14.5 signal
 oracle runtime. The wider private engineering workspace separately passed
 `679` tests with `22` documented platform/runtime skips and `36` subtests.

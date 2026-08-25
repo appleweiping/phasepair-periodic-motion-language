@@ -73,7 +73,10 @@ private receipts, raw logs, checkpoints, or per-sample outputs.
 `RELEASE_FILES.sha256` binds the tracked public snapshot while
 `scripts/public_release_audit.py` rejects forbidden paths, local locators,
 unexpected binaries, common credential patterns, and endpoint-shaped strings.
-Neither mechanism certifies scientific correctness or third-party rights.
+An exact Git checkout is audited from Git-index paths and blob bytes; a GitHub
+codeload archive is accepted only when its complete regular-file set and bytes
+match the manifest. Local-link checks read the same resolved authority. Neither
+mechanism certifies scientific correctness or third-party rights.
 
 ## Remaining completion gates
 

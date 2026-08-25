@@ -8,9 +8,20 @@ import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 
+sys.dont_write_bytecode = True
+
+from release_tree import (  # noqa: E402
+    MANIFEST_HEADER,
+    MANIFEST_RELATIVE,
+    ReleaseTreeError,
+    clean_git_environment,
+    git_tracked_paths,
+    is_exact_git_checkout,
+    load_archive_manifest,
+)
+
 
 ROOT = Path(__file__).resolve().parents[1]
-MANIFEST_RELATIVE = PurePosixPath("RELEASE_FILES.sha256")
 
 
 class ManifestError(RuntimeError):
@@ -18,32 +29,9 @@ class ManifestError(RuntimeError):
 
 
 def _tracked_paths() -> tuple[PurePosixPath, ...]:
-    completed = subprocess.run(
-        ["git", "ls-files", "--cached", "-z"],
-        cwd=ROOT,
-        check=True,
-        stdout=subprocess.PIPE,
+    return tuple(
+        path for path in git_tracked_paths(ROOT) if path != MANIFEST_RELATIVE
     )
-    raw_paths = completed.stdout.split(b"\0")
-    if raw_paths and raw_paths[-1] == b"":
-        raw_paths.pop()
-    paths: list[PurePosixPath] = []
-    for raw in raw_paths:
-        try:
-            decoded = raw.decode("utf-8", errors="strict")
-        except UnicodeDecodeError as exc:
-            raise ManifestError("tracked paths must be valid UTF-8") from exc
-        if "\t" in decoded or "\n" in decoded or "\r" in decoded:
-            raise ManifestError("tracked paths may not contain tabs or newlines")
-        path = PurePosixPath(decoded)
-        if path.is_absolute() or ".." in path.parts:
-            raise ManifestError(f"unsafe tracked path: {decoded!r}")
-        if path != MANIFEST_RELATIVE:
-            paths.append(path)
-    ordered = tuple(sorted(paths, key=lambda item: item.as_posix().encode("utf-8")))
-    if len(ordered) != len(set(ordered)):
-        raise ManifestError("duplicate tracked path")
-    return ordered
 
 
 def _index_blob(path: PurePosixPath) -> bytes:
@@ -51,49 +39,26 @@ def _index_blob(path: PurePosixPath) -> bytes:
         ["git", "cat-file", "blob", f":{path.as_posix()}"],
         cwd=ROOT,
         check=True,
+        env=clean_git_environment(),
         stdout=subprocess.PIPE,
     )
     return completed.stdout
 
 
-def _index_mode(path: PurePosixPath) -> str:
-    completed = subprocess.run(
-        ["git", "ls-files", "--stage", "-z", "--", path.as_posix()],
-        cwd=ROOT,
-        check=True,
-        stdout=subprocess.PIPE,
-    )
-    entries = [entry for entry in completed.stdout.split(b"\0") if entry]
-    if len(entries) != 1 or b"\t" not in entries[0]:
-        raise ManifestError(f"expected one staged entry: {path}")
-    header, listed_path = entries[0].split(b"\t", 1)
-    if listed_path.decode("utf-8", errors="strict") != path.as_posix():
-        raise ManifestError(f"staged path identity mismatch: {path}")
-    fields = header.split(b" ")
-    if len(fields) != 3:
-        raise ManifestError(f"malformed staged entry: {path}")
-    mode = fields[0].decode("ascii", errors="strict")
-    if mode not in {"100644", "100755"}:
-        raise ManifestError(f"tracked entry must be a regular file: {path}")
-    return mode
-
-
 def _row(path: PurePosixPath) -> str:
-    absolute = ROOT.joinpath(*path.parts)
-    if absolute.is_symlink() or not absolute.is_file():
-        raise ManifestError(f"tracked release entry must be a regular file: {path}")
-    _index_mode(path)
     raw = _index_blob(path)
     return f"{hashlib.sha256(raw).hexdigest()}\t{len(raw)}\t{path.as_posix()}"
 
 
 def render_manifest() -> bytes:
-    header = "# sha256\\tbytes\\tgit_index_path; self excluded\n"
+    header = MANIFEST_HEADER.decode("ascii")
     rows = "\n".join(_row(path) for path in _tracked_paths())
     return (header + rows + ("\n" if rows else "")).encode("utf-8")
 
 
 def build_manifest() -> None:
+    if not is_exact_git_checkout(ROOT):
+        raise ManifestError("manifest build requires the exact Git checkout")
     destination = ROOT / MANIFEST_RELATIVE.as_posix()
     temporary = destination.with_suffix(destination.suffix + ".tmp")
     temporary.write_bytes(render_manifest())
@@ -101,9 +66,9 @@ def build_manifest() -> None:
 
 
 def verify_manifest() -> None:
-    destination = ROOT / MANIFEST_RELATIVE.as_posix()
-    if not destination.is_file() or destination.is_symlink():
-        raise ManifestError("release manifest is missing or not a regular file")
+    if not is_exact_git_checkout(ROOT):
+        load_archive_manifest(ROOT)
+        return
     expected = render_manifest()
     actual = _index_blob(MANIFEST_RELATIVE)
     if actual != expected:
@@ -126,6 +91,11 @@ def main(argv: list[str] | None = None) -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (ManifestError, OSError, subprocess.CalledProcessError) as exc:
+    except (
+        ManifestError,
+        OSError,
+        ReleaseTreeError,
+        subprocess.CalledProcessError,
+    ) as exc:
         print(f"RELEASE_MANIFEST_ERROR: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc

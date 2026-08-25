@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import io
 import re
 import subprocess
+import sys
 import zipfile
 from pathlib import Path, PurePosixPath
+
+sys.dont_write_bytecode = True
+
+from release_tree import ReleaseTreeError, resolve_release_tree  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -51,21 +57,12 @@ class PublicReleaseAuditError(RuntimeError):
     """A tracked release item violates the public-only boundary."""
 
 
-def _tracked_paths() -> tuple[PurePosixPath, ...]:
-    completed = subprocess.run(
-        ["git", "ls-files", "--cached", "-z"],
-        cwd=ROOT,
-        check=True,
-        stdout=subprocess.PIPE,
-    )
+def _validated_paths(
+    resolved: tuple[PurePosixPath, ...],
+) -> tuple[PurePosixPath, ...]:
     paths: list[PurePosixPath] = []
-    for raw in completed.stdout.split(b"\0"):
-        if not raw:
-            continue
-        decoded = raw.decode("utf-8", errors="strict")
-        path = PurePosixPath(decoded)
-        if path.is_absolute() or ".." in path.parts:
-            raise PublicReleaseAuditError(f"unsafe tracked path: {decoded!r}")
+    for path in resolved:
+        decoded = path.as_posix()
         if any(part.casefold() in FORBIDDEN_PATH_PARTS for part in path.parts):
             raise PublicReleaseAuditError(f"forbidden tracked path: {decoded!r}")
         paths.append(path)
@@ -82,9 +79,9 @@ def _scan_bytes(raw: bytes, label: str) -> None:
             raise PublicReleaseAuditError(f"credential or endpoint pattern in {label}")
 
 
-def _scan_pptx(path: Path, label: str) -> None:
+def _scan_pptx(raw: bytes, label: str) -> None:
     try:
-        with zipfile.ZipFile(path) as archive:
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
             for member in archive.infolist():
                 member_path = PurePosixPath(member.filename)
                 if member_path.is_absolute() or ".." in member_path.parts:
@@ -101,19 +98,15 @@ def _scan_pptx(path: Path, label: str) -> None:
 
 
 def audit() -> tuple[int, int]:
-    paths = _tracked_paths()
+    tree = resolve_release_tree(ROOT)
+    paths = _validated_paths(tree.paths)
     total_bytes = 0
     for relative in paths:
-        absolute = ROOT.joinpath(*relative.parts)
-        if absolute.is_symlink() or not absolute.is_file():
-            raise PublicReleaseAuditError(
-                f"tracked item must be one regular file: {relative.as_posix()}"
-            )
-        raw = absolute.read_bytes()
+        raw = tree.read_bytes(relative)
         total_bytes += len(raw)
         label = relative.as_posix()
         if relative.suffix.casefold() == ".pptx":
-            _scan_pptx(absolute, label)
+            _scan_pptx(raw, label)
         else:
             if b"\0" in raw:
                 raise PublicReleaseAuditError(f"unexpected binary tracked file: {label}")
@@ -133,6 +126,7 @@ if __name__ == "__main__":
     except (
         OSError,
         PublicReleaseAuditError,
+        ReleaseTreeError,
         subprocess.CalledProcessError,
         UnicodeDecodeError,
     ) as exc:

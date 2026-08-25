@@ -16,11 +16,12 @@ authorization.
 - `pyproject.toml` with Python 3.12--3.14 package metadata and separate exact
   3.14.5 signal-oracle dependencies;
 - `.github/workflows/ci.yml` for 3.12.0 and 3.14.5 data-free CI;
-- `scripts/public_release_audit.py` for forbidden-path, locator, binary,
-  credential-pattern, and endpoint-pattern checks;
+- `scripts/release_tree.py`, `scripts/public_release_audit.py`, and
+  `scripts/check_local_links.py` for one authority-consistent view of paths,
+  bytes, forbidden content, and repository-local link targets;
 - `scripts/release_manifest.py` plus `RELEASE_FILES.sha256` for deterministic
   Git-index blob hashes and byte counts, independent of checkout line-ending
-  conversion;
+  conversion, and exact file-set/hash verification in GitHub codeload archives;
 - `src/phasepair_core/` and matching synthetic/data-free tests;
 - sanitized specifications and aggregate no-result evidence under `docs/`;
 - the anonymous no-result manuscript skeleton under `paper/`;
@@ -51,14 +52,16 @@ tokenizer invocation. The public code fails closed on that boundary.
 
 ## Verification scope
 
-- Windows x86-64, CPython 3.14.5 public tree: `568 passed, 3 skipped, 36
+- Windows x86-64, CPython 3.14.5 public tree: `571 passed, 3 skipped, 36
   subtests passed`.
-- Windows x86-64, CPython 3.12.0 public tree: `567 passed, 3 skipped, 1
+- Windows x86-64, CPython 3.12.0 public tree: `570 passed, 3 skipped, 1
   deselected, 36 subtests passed`; the deselection is the exact 3.14.5
   signal-runtime identity test.
 - Ubuntu portability lane: public audit, checksum manifest, local links, Ruff,
   and no-dependency wheel build; it does not qualify the fixed signal oracle.
 - Ruff: clean across `src`, `tests`, and `scripts`.
+- Release-tool regression tests reject parent-repository attachment, empty
+  passes, archive tampering/extra files, and Git-index/worktree divergence.
 - The no-result manuscript builds to four pages with BibTeX, no undefined
   citation/reference, and no overfull horizontal box.
 - Independent caption/training/sampler review: PASS for bare-CR handling,
