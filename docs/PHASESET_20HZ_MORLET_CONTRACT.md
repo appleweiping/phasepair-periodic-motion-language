@@ -1,7 +1,7 @@
 # PhaseSet 20 Hz Morlet rate contract
 
-**Schema:** `phaseset-morlet-bank-v1/fs20/three-cycle`  
-**Frozen before real-data execution:** 2026-08-25 +08:00  
+**Schema:** `phaseset-morlet-bank-v1/fs20/three-cycle`
+**Frozen before real-data execution:** 2026-08-25 +08:00
 **Status:** `DATA_FREE / AUTHORITY0 / NO_RESULT`
 
 PhaseSet motion is antialiased and resampled from 30 fps to 20 fps before its

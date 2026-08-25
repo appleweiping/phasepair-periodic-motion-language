@@ -1,8 +1,8 @@
 # PhaseSet frozen research contract
 
-**Contract ID:** `phaseset-multiperson-20260825`  
-**Frozen at:** 2026-08-25 20:43:38 +08:00  
-**Target:** ICASSP 2027, Multimedia Signal Processing primary topic  
+**Contract ID:** `phaseset-multiperson-20260825`
+**Frozen at:** 2026-08-25 20:43:38 +08:00
+**Target:** ICASSP 2027, Multimedia Signal Processing primary topic
 **State:** `FROZEN / AUTHORITY0 / NO_REAL_DATA_RESULT / NO_CLAIM`
 
 This document is the public-safe scientific contract for PhaseSet. It
