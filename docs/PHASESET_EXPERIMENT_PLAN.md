@@ -1,7 +1,7 @@
 # PhaseSet frozen experiment and statistics plan
 
-**Plan ID:** `phaseset-multiperson-20260825`  
-**Frozen at:** 2026-08-25 20:43:38 +08:00  
+**Plan ID:** `phaseset-multiperson-20260825`
+**Frozen at:** 2026-08-25 20:43:38 +08:00
 **State:** `FROZEN / NOT_EXECUTED / SEALED_TEST_CLOSED`
 
 This is the public-safe execution census. It contains no private membership,

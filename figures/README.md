@@ -17,4 +17,3 @@ The motivation figure deliberately constructs two four-actor complete graphs
 with the same actor marginals and the same multiset of six pair tokens (two of
 each relation type) but different actor–edge incidence. Pair-bag averaging is
 therefore identical, while incident moments can distinguish the structures.
-
