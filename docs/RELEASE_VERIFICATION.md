@@ -1,4 +1,4 @@
-# PhaseSet v0.2.0 release verification
+# PhaseSet v0.2.1 release verification
 
 This procedure covers the two release boundaries that
 `RELEASE_FILES.sha256` cannot establish by itself: wheel packaging and the
@@ -36,14 +36,14 @@ still fixed by this independently frozen manifest.
 
 ## 2. Publish payload assets, then build the receipt
 
-Create the annotated `v0.2.0` tag and GitHub release, and upload every payload
-asset except `PHASESET_v0.2.0_ASSET_INVENTORY.json`. Capture GitHub REST bodies
+Create the annotated `v0.2.1` tag and GitHub release, and upload every payload
+asset except `PHASESET_v0.2.1_ASSET_INVENTORY.json`. Capture GitHub REST bodies
 and download those uploaded payloads into a new directory. The five required
 responses are:
 
 - `GET /repos/appleweiping/phaseset-multiperson-motion-language`;
-- `GET /repos/appleweiping/phaseset-multiperson-motion-language/releases/tags/v0.2.0`;
-- `GET /repos/appleweiping/phaseset-multiperson-motion-language/git/ref/tags/v0.2.0`;
+- `GET /repos/appleweiping/phaseset-multiperson-motion-language/releases/tags/v0.2.1`;
+- `GET /repos/appleweiping/phaseset-multiperson-motion-language/git/ref/tags/v0.2.1`;
 - `GET /repos/appleweiping/phaseset-multiperson-motion-language/git/tags/{tag_object_sha}`;
 - `GET /repos/appleweiping/phaseset-multiperson-motion-language/git/commits/{peeled_commit_sha}`.
 
@@ -54,7 +54,7 @@ Run:
 python scripts/release_asset_inventory.py build \
   --expected-repository-id 1345199252 \
   --expected-repository appleweiping/phaseset-multiperson-motion-language \
-  --expected-tag v0.2.0 \
+  --expected-tag v0.2.1 \
   --repository-json evidence/repository.json \
   --release-json evidence/release-before-inventory.json \
   --tag-ref-json evidence/tag-ref.json \
@@ -63,9 +63,9 @@ python scripts/release_asset_inventory.py build \
   --asset-dir uploaded-payload-download \
   --expected-assets-json evidence/expected-release-assets.json \
   --expected-assets-sha256 EXPECTED_MANIFEST_SHA256_FROM_EXTERNAL_RECORD \
-  --tag-checkout clean-v0.2.0-checkout \
-  --self-asset-name PHASESET_v0.2.0_ASSET_INVENTORY.json \
-  --output uploaded-payload-download/PHASESET_v0.2.0_ASSET_INVENTORY.json
+  --tag-checkout clean-v0.2.1-checkout \
+  --self-asset-name PHASESET_v0.2.1_ASSET_INVENTORY.json \
+  --output uploaded-payload-download/PHASESET_v0.2.1_ASSET_INVENTORY.json
 ```
 
 The builder first requires a clean checkout whose annotated tag, commit, and
@@ -90,7 +90,7 @@ otherwise empty directory. Run:
 python scripts/release_asset_inventory.py verify \
   --expected-repository-id 1345199252 \
   --expected-repository appleweiping/phaseset-multiperson-motion-language \
-  --expected-tag v0.2.0 \
+  --expected-tag v0.2.1 \
   --repository-json evidence-after/repository.json \
   --release-json evidence-after/release-with-inventory.json \
   --tag-ref-json evidence-after/tag-ref.json \
@@ -99,8 +99,8 @@ python scripts/release_asset_inventory.py verify \
   --asset-dir fresh-complete-release-download \
   --expected-assets-json evidence/expected-release-assets.json \
   --expected-assets-sha256 EXPECTED_MANIFEST_SHA256_FROM_EXTERNAL_RECORD \
-  --tag-checkout clean-v0.2.0-checkout \
-  --receipt fresh-complete-release-download/PHASESET_v0.2.0_ASSET_INVENTORY.json
+  --tag-checkout clean-v0.2.1-checkout \
+  --receipt fresh-complete-release-download/PHASESET_v0.2.1_ASSET_INVENTORY.json
 ```
 
 Verification fails on any missing/extra/re-uploaded asset, unsafe filename,

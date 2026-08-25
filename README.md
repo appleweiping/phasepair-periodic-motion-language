@@ -41,11 +41,13 @@ multi-person skeleton sequence
 
 ## Current milestone
 
-This source snapshot declares `v0.2.0`, the stable data-free multi-person core
-and execution-contract milestone. It is a release candidate until an immutable
-annotated `v0.2.0` tag and its GitHub release are observed; a package version or
-branch alone is not publication evidence. The milestone does not imply that
-the private experiment DAG, resource study, or publication renderer has
+This source snapshot declares `v0.2.1`, the portable-verification patch for the
+stable data-free multi-person core and execution-contract milestone. It is a
+release candidate until an immutable annotated `v0.2.1` tag and its GitHub
+release are observed; a package version or branch alone is not publication
+evidence. The immutable `v0.2.0` release remains preserved and is not moved.
+The patch changes no model or scientific contract. The milestone does not imply
+that the private experiment DAG, resource study, or publication renderer has
 produced a real result.
 In addition to the migration contracts from `v0.2.0-alpha.1`, it contains the
 executable systems 00--08, the licensed-format-independent 30-to-20 Hz group

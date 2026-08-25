@@ -389,7 +389,19 @@ class ReadinessTests(unittest.TestCase):
             version=SimpleNamespace(cuda=None),
             cuda=SimpleNamespace(is_available=lambda: False),
         )
-        observed = readiness.observe_local_runtime(torch_importer=lambda: fake)
+        # Construct the registered signal oracle instead of assuming that a
+        # portable ``.[test]`` install resolved the optional ``.[signal]``
+        # dependency versions.  The latter is intentionally an environment
+        # observation, not a package-wide test prerequisite.
+        with (
+            mock.patch.object(
+                readiness.platform,
+                "python_version",
+                return_value=readiness.SIGNAL_PYTHON,
+            ),
+            mock.patch.object(readiness.np, "__version__", readiness.SIGNAL_NUMPY),
+        ):
+            observed = readiness.observe_local_runtime(torch_importer=lambda: fake)
         self.assertEqual(observed.python_version, readiness.SIGNAL_PYTHON)
         self.assertEqual(observed.numpy_version, readiness.SIGNAL_NUMPY)
         self.assertEqual(
@@ -406,6 +418,40 @@ class ReadinessTests(unittest.TestCase):
         object.__setattr__(forged, "platform_string", "x")
         with self.assertRaises(TypeError):
             readiness.validate_signal_oracle_runtime(forged)
+
+    def test_runtime_observation_reports_the_installed_numpy_version(self) -> None:
+        fake = SimpleNamespace(
+            __version__="2.12.0+cpu",
+            version=SimpleNamespace(cuda=None),
+            cuda=SimpleNamespace(is_available=lambda: False),
+        )
+        observed = readiness.observe_local_runtime(torch_importer=lambda: fake)
+        self.assertEqual(observed.numpy_version, np.__version__)
+        self.assertEqual(observed.python_version, readiness.platform.python_version())
+
+    def test_signal_oracle_rejects_wrong_implementation_or_versions(self) -> None:
+        cases = (
+            ("PyPy", readiness.SIGNAL_PYTHON, readiness.SIGNAL_NUMPY, "requires CPython"),
+            ("CPython", "0.0.0", readiness.SIGNAL_NUMPY, "version mismatch"),
+            ("CPython", readiness.SIGNAL_PYTHON, "0.0.0", "version mismatch"),
+        )
+        for implementation, python_version, numpy_version, message in cases:
+            with self.subTest(
+                implementation=implementation,
+                python_version=python_version,
+                numpy_version=numpy_version,
+            ):
+                observation = readiness.RuntimeObservation(
+                    python_version,
+                    implementation,
+                    numpy_version,
+                    "2.12.0+cpu",
+                    "NONE",
+                    False,
+                    "test-platform",
+                )
+                with self.assertRaisesRegex(readiness.ReadinessError, message):
+                    readiness.validate_signal_oracle_runtime(observation)
 
     def test_missing_and_complete_references_never_authorize_training(self) -> None:
         missing = readiness.assess_training_readiness(
