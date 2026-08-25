@@ -53,10 +53,49 @@ the following:
 - every actor row has a nonempty string text entry;
 - frame length and participant membership agree across the repeated rows.
 
+This `K>=3` condition belongs to the confirmatory Embody study, not to the
+software API. The public preparation and model contracts accept every valid
+`K>=2` group so dyadic backward-transfer evaluation remains possible; such
+dyadic samples cannot enter the native multi-person main table.
+
 This establishes index-level actor-text availability only. It does not prove
 that an annotation file is readable, semantically correct, or holistic. Asset
 existence, rights, hashes, and annotation quality remain execution-time gates
 after authorized dataset access.
+
+### Auxiliary machine-fused caption contract
+
+`caption_fusion.py` exposes a text-only, host-injected contract for the
+auxiliary ten-second group-caption task. It is fixed to `gpt-5.6-sol`, one
+versioned prompt, a three-attempt transient-only retry policy, and three
+distinct deterministic actor orders that are actually sent to the backend.
+All three normalized outputs must be identical or fusion fails closed. This is
+evidence of normalized surface stability under the three tested orders, not a
+semantic-equivalence proof. Same-model-family semantic review therefore stays
+`PROVISIONAL` and cannot close an execution or scientific gate. The
+backend request contains only the K official human actor descriptions and an
+optional official human holistic context from the same window; commitments,
+split labels, skeletons, phase/coherence fields, model outputs, and paths are
+absent from that request schema.
+
+Before any request, the host-injected backend must expose a frozen manifest
+binding the exact model revision, backend implementation, inference runtime,
+`temperature=0`, `top_p=1`, generation seed `1729`, maximum 512 output tokens,
+and the strict two-field JSON response format. Each request binds that manifest
+and model revision; a caller-supplied model name alone is insufficient.
+
+The raw input and generated text remain private in-memory values with no
+serializer. The only public serializer emits a digest-only authority-zero
+receipt that binds prompt/model/backend/input/output/provenance/retries and
+states `machine_fused=true`, `human_annotation=false`, and
+same-family review `PROVISIONAL`. Test provenance includes both a sealed
+test-manifest digest and a sealed test-caption digest, but digest strings alone
+cannot admit fusion. A trusted host gate must verify and consume an external
+grant, return a `CaptionFusionTestAdmission` bound to that exact provenance,
+and record external-grant and consumption digests. The public receipt exposes
+only the resulting admission digest. These local schemas cannot authenticate
+dataset rights or close the semantic-review or sealed-evaluation gates by
+themselves.
 
 The audited eligible pool contains 572 unique captures, 69 participants,
 2,232,649 source frames, and 20.672675926 hours at 30 fps. It consists of 296
@@ -135,6 +174,14 @@ per-participant validity, maximum run length, and boundary-gap status.
 `interpolate_accepted_gaps()` returns the filled kinematics together with the
 unchanged source mask. Interpolation never changes a false mask bit to true.
 
+The numeric seam expands the official actor-frame indicator across the 22 body
+joints. It validates that all 22 bits are identical within each actor-frame;
+a partial-joint mask is rejected before interpolation. This prevents one
+missing joint from causing every joint to be interpolated while other channels
+remain falsely labelled observed. Each accepted sample retains private
+source-file and source-window SHA-256 lineage metadata. Those digests bind the
+preparation manifest but are not model inputs or public participant labels.
+
 ## 30 to 20 fps resampling
 
 Resampling maps exactly 300 frames at 30 fps to exactly 200 frames at 20 fps and
@@ -164,6 +211,22 @@ All downstream PhaseSet periodic responses therefore use the independent
 30-Hz PhasePair v0.1.0 tap bytes are not applied to the resampled sequence and
 are not relabelled as 20-Hz filters.
 
+### Production and gradient-qualification boundary
+
+The production periodic path validates a `PreparedGroupBatch`, derives the
+five-channel activity representation in NumPy, and streams NumPy Morlet/pair
+descriptors into the learned Torch edge heads. It is intentionally an explicit
+non-differentiable boundary: production execution does not claim gradients to
+the original skeleton array.
+
+`PhaseSetEncoder.forward_skeleton_autograd_oracle()` is a separate,
+small-batch CPU qualification path. It keeps skeleton-to-activity, Morlet, and
+edge summaries in Torch autograd, accepts arbitrary valid-actor positions, and
+shares the registered edge/topology/postprocess parameters with the production
+encoder. It exists to test skeleton-input gradient permutation equivariance;
+it is not a production data adapter, accelerator result, or assertion that the
+NumPy descriptor stream is differentiable.
+
 ## Group coordinate canonicalization
 
 Input positions have shape `[T,K,J,3]` and root yaw has shape `[T,K]`. The
@@ -178,6 +241,11 @@ default reference is the first frame that observes all participants.
 - Training may separately supply one sampled `augmentation_yaw`. The applied
   angle is `augmentation_yaw - shared_yaw` and the exact same rotation/addition
   is used for every participant and frame.
+- The public training seam derives this yaw only from the registered seed,
+  epoch, and a globally unique window ordinal supplied by the frozen manifest.
+  A capture-local default is forbidden. Actor and group commitments never key
+  an augmentation and therefore remain lineage/reduction-order metadata rather
+  than neural inputs. Distinct windows receive distinct deterministic draws.
 - Per-participant centering or per-participant yaw normalization is forbidden:
   it would erase relative group position and facing.
 

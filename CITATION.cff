@@ -1,12 +1,12 @@
 cff-version: 1.2.0
-message: "If you use PhaseSet, please cite this software release and the accompanying paper when available."
+message: "If you use PhaseSet, please cite the exact tagged software version and the accompanying paper when available."
 title: "PhaseSet: Permutation-Invariant Periodic Relation Tokens for Multi-Person Motion–Language Retrieval"
 type: software
 authors:
   - name: "PhaseSet contributors"
 repository-code: "https://github.com/appleweiping/phaseset-multiperson-motion-language"
 license: MIT
-version: 0.2.0-alpha.1
+version: 0.2.0
 keywords:
   - multi-person motion
   - motion-language retrieval

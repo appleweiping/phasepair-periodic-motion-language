@@ -139,11 +139,15 @@ by a fixed masked mean. Missing holistic captions are removed before any model
 score is computed and do not trigger split reassignment.
 
 The auxiliary 10 s task may machine-fuse the K human actor descriptions and
-available holistic context into one group caption plus one meaning-preserving
-paraphrase. The frozen semantic model may not read skeletons, spectra, phase,
-model outputs, or split statistics. Prompts, model identity, digests, retries,
-and actor-order perturbation audits are retained privately. Such text is always
-labelled machine-fused and never described as human group annotation.
+available holistic context into one group caption plus one paraphrase intended
+to preserve meaning. That request is not proof of semantic equivalence. The
+frozen semantic model may not read skeletons, spectra, phase, model outputs, or
+split statistics. Prompts, model identity, digests, retries, and actor-order
+perturbation audits are retained privately. Such text is always labelled
+machine-fused and never described as human group annotation. A same-model-
+family semantic review has status
+`PROVISIONAL_SAME_MODEL_FAMILY_REVIEW_NOT_GATE_CLOSING`; it cannot close any
+data, execution, sealed-test, or scientific-claim gate.
 
 InterHuman/Inter-X are K=2 backward-transfer datasets only. Multi-TPC is a
 separate cross-domain task. M3Act3D and AIOZ-GDANCE are engineering/probe data,
@@ -157,15 +161,42 @@ ActorMean, SetPMA, and SocialTemporal. Each is trained for all three fixed
 seeds. The winner maximizes validation bidirectional R@1 mean across the three
 seeds; exact ties choose fewer parameters, then lower latency, then smaller
 system ID. Each winning seed checkpoint is frozen and shared by every residual
-system for that seed.
+system for that seed. The nine-row qualification retains the original score,
+terminal, checkpoint, validation-manifest, query-census, evaluator, and unique
+score-artifact evidence. Production recomputes it and requires an independently
+authenticated authorization over the exact nine-row census; it must also match
+an externally frozen qualification digest.
+Checkpoint-local metadata establishes validation-best-at-write only; the
+completed terminal and trusted qualification receipt establish final
+selection. The complete systems 01--08 capacity audit is independently
+digest-pinned and freshly rebuilt before formal residual construction.
+
+The generic-token control exposes fixed band identity for all six bands on
+every valid actor pair and has no motion/Morlet/energy path. The marginal
+Morlet control pools each actor/band once from only that actor's response and
+observation mask, then combines two cached self-marginals per pair. Its support
+is length-only: partner-mask intersection, energy gates, phase, coherence, and
+cross-person products are prohibited. The DCT control computes each endpoint's
+self-power independently and exposes only symmetric mean and difference
+statistics; it has no cross-endpoint product, phase, or lag, and requires both
+endpoint powers to pass the same per-band floor. The coverage/missing-only
+control derives pair/band support solely from observation-window overlap and
+band length. With observation masks fixed, motion values, amplitude, energy,
+phase, and coherence must leave its support, counts, and output tokens bitwise
+unchanged; an unsupported band is exact positive zero after the hard band gate.
 
 H1, the sole primary hypothesis, is `PhaseSet full > qualified base` on the
 registered primary metric. H2–H8 compare full against generic tokens, marginal
 Morlet power, mean/difference DCT, pair-bag, coverage/missing-only,
 incidence-shuffled, and phase-stripped controls respectively. Statistical
-units are captures or participant components, never captions or windows.
-Inference uses 100,000 paired capture-cluster bootstrap draws; H2–H8 use Holm
-correction.
+units are captures or participant components, never captions or windows. Each
+system and training seed is ranked independently; logits are never averaged
+across seeds. For a capture, the three paired seed effects are averaged in
+fixed order and only then receive 100,000 capture-cluster bootstrap draws.
+Seeds are not resampled or treated as independent observations. H1--H8 use one
+shared resampling stream; H2–H8 alone use Holm correction. The frozen aggregate
+binds all 27 checkpoint/score/evaluation identities and reports the three-seed
+mean plus population standard deviation.
 
 The claim ladder is fail-closed:
 
@@ -194,6 +225,13 @@ private split/caption digests, deterministic core tests, Linux/CUDA Morlet and
 CLIP qualification, BF16 or FP32 precision qualification, synthetic
 forward/backward/checkpoint/resume, and a disposable 64-capture overfit. Until
 these exist, the scientific authority remains zero.
+
+Formal execution enables deterministic algorithms in error mode, uses highest
+float32 matmul precision, disables TF32 and reduced-precision reductions,
+enables deterministic cuDNN with benchmarking off, and requires a deterministic
+cuBLAS workspace setting on CUDA. Hardware, runtime, build, thread counts, and
+this numerical policy are bound in the environment digest and checked for live
+drift.
 
 The registered server is operational evidence only. Connection must target
 the registered non-default port, verify the host key, and begin with a
