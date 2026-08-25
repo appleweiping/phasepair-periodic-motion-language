@@ -315,12 +315,28 @@ def _metadata_requirements(message: object, project: StagedProject) -> None:
     if normalized_extras != tuple(sorted(project.optional_dependencies)):
         raise WheelIndexVerificationError("wheel Provides-Extra differs from staged project")
     actual_python = _optional_single_header(message, "Requires-Python")
-    if (re.sub(r"\s+", "", actual_python) if actual_python is not None else None) != (
-        re.sub(r"\s+", "", project.requires_python)
-        if project.requires_python is not None
-        else None
+    if _python_specifier_terms(actual_python) != _python_specifier_terms(
+        project.requires_python
     ):
         raise WheelIndexVerificationError("wheel Requires-Python differs from staged project")
+
+
+def _python_specifier_terms(value: str | None) -> tuple[str, ...] | None:
+    """Normalize only order and whitespace in a PEP 440 specifier set.
+
+    Build backends are allowed to reorder comma-separated terms (setuptools
+    emits ``<3.15,>=3.12`` for staged ``>=3.12,<3.15``).  Keeping every compact
+    term byte-identical after sorting accepts that representation change while
+    still rejecting a changed bound, operator, version, duplicate, or term set.
+    """
+
+    if value is None:
+        return None
+    compact = re.sub(r"\s+", "", value)
+    terms = compact.split(",")
+    if not compact or any(not term for term in terms):
+        raise WheelIndexVerificationError("Requires-Python specifier set is malformed")
+    return tuple(sorted(terms))
 
 
 def _metadata_identity(

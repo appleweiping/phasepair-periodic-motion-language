@@ -52,7 +52,7 @@ def _repository(tmp_path: Path) -> Path:
         """[project]
 name = "phaseset-core"
 version = "0.2.0"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.15"
 dependencies = ["numpy>=1.26,<3"]
 
 [project.optional-dependencies]
@@ -81,6 +81,7 @@ def _wheel(
     sources: dict[str, bytes] | None = None,
     filename_version: str = "0.2.0",
     metadata_version: str = "0.2.0",
+    requires_python: str = "<3.15,>=3.12",
     entrypoint: str = "phaseset_core.cli:main",
     requires_dist: tuple[str, ...] = (
         "numpy<3,>=1.26",
@@ -104,7 +105,7 @@ def _wheel(
         "Metadata-Version: 2.4\n"
         "Name: phaseset-core\n"
         f"Version: {metadata_version}\n"
-        "Requires-Python: >=3.12\n"
+        f"Requires-Python: {requires_python}\n"
         "Provides-Extra: test\n"
         + "".join(f"Requires-Dist: {requirement}\n" for requirement in requires_dist)
         + "\n"
@@ -176,6 +177,7 @@ def test_wheel_is_bound_to_index_bytes_not_unstaged_worktree(tmp_path: Path) -> 
         ("extra", "source set differs from staged index"),
         ("metadata-version", "dist-info directory does not bind staged name/version"),
         ("filename-version", "wheel filename does not bind staged name/version"),
+        ("requires-python", "Requires-Python differs from staged project"),
         ("entrypoint", "entry points differ from staged project"),
     ),
 )
@@ -197,6 +199,8 @@ def test_wheel_rejects_source_and_identity_drift(
         arguments["metadata_version"] = "9.9.9"
     elif case == "filename-version":
         arguments["filename_version"] = "9.9.9"
+    elif case == "requires-python":
+        arguments["requires_python"] = ">=3.11,<3.15"
     elif case == "entrypoint":
         arguments["entrypoint"] = "phaseset_core.cli:wrong"
     wheel = _wheel(root, sources=sources, **arguments)  # type: ignore[arg-type]
