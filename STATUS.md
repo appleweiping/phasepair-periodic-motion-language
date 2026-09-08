@@ -13,6 +13,21 @@ evidence, not training results or scientific claims.
 
 ## Server continuation
 
+- The complete frozen base-latency runner, exact qualification assembler,
+  typed progress observer and durable POSIX journal are implemented. Separately,
+  a weight-independent three-stream periodic descriptor cache now preserves
+  exact canonical batches and bounded immutable shards. The merged Linux
+  server source passed 1211 tests, 2 existing skips and 39 subtests in 362.75 s
+  with source unchanged. Journal integration passed 73 combined tests;
+  descriptor storage/streaming then passed 19 focused tests after a test-only
+  hardlink/oversize case split. These are explicit
+  software fixtures, not a real nine-run cohort, formal CUDA latency session,
+  winner or licensed-data cache. Production cache-model/training/resume and
+  host qualification command assembly remain unfinished. See
+  [base qualification](docs/BASE_COHORT_QUALIFICATION.md),
+  [progress journal](docs/LATENCY_PROGRESS_JOURNAL.md) and
+  [descriptor cache](docs/PERIODIC_DESCRIPTOR_CACHE_V2.md).
+
 - The window-caption provenance component now checks the complete chain from
   same-window fusion inputs/outputs through ordered frozen text rows to the
   materialized training census. An actual official-CLIP probe exposed and fixed
@@ -38,8 +53,9 @@ evidence, not training results or scientific claims.
   A separate unmocked full-width B0/B1/B2 selected-state-to-gallery witness
   passed all three lanes in 19.36 s on analytic K2/K3, T200 captures. It uses
   explicit checkpoint-cursor and text fixtures, not completed formal epochs,
-  real captions or an actual nine-run cohort. Latency, qualification selection
-  and host command assembly remain separate unfinished steps. The merged source
+  real captions or an actual nine-run cohort. At that earlier snapshot, latency and qualification assembly were
+  unfinished; their newer software verification is reported above. Actual
+  qualification execution and host command assembly remain unfinished. The merged source
   then passed 1124 complete Linux server tests, 2 existing skips and 39 subtests
   in 315.67 s with the source census unchanged. See
   [completed-base capture scoring](docs/BASE_COHORT_VALIDATION.md).
