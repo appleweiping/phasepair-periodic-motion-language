@@ -289,6 +289,8 @@ def build_parser() -> argparse.ArgumentParser:
     resume.add_argument("--attempt-dir", type=Path)
     resume.add_argument("--checkpoint", dest="resume_checkpoint", type=Path)
     resume.add_argument("--system-id", choices=_RESUME_SYSTEM_IDS)
+    resume.add_argument("--base-checkpoint", type=Path)
+    resume.add_argument("--periodic-cache", type=Path)
 
     return parser
 

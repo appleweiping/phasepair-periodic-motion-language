@@ -7,7 +7,7 @@ microbatches; missing or mismatched artifacts stop at the repository's
 existing ``ExecutionHold`` boundary.
 
 The implemented command surface is intentionally small: ``preflight``,
-``run-base``, ``run-residual``, and base ``resume``. Other commands raise
+``run-base``, ``run-residual``, and base/residual ``resume``. Other commands raise
 before a ``BackendExecution`` can be manufactured.
 """
 
@@ -19,6 +19,7 @@ import hashlib
 import io
 import json
 import os
+import stat
 import sys
 import threading
 from collections.abc import Iterable, Mapping, Sequence
@@ -879,20 +880,203 @@ def _write_once_json(path: Path, value: object) -> Path:
     return path
 
 
+def _copy_verified_checkpoint(
+    source: Path,
+    destination: Path,
+    *,
+    expected_sha256: str,
+) -> tuple[Path, bytes]:
+    """Materialize already-verified checkpoint bytes under a new attempt."""
+
+    _reject_symlink_components(source, "resume checkpoint source")
+    _reject_symlink_components(destination.parent, "resume checkpoint destination")
+    if (
+        not source.is_file()
+        or not destination.parent.is_dir()
+        or destination.exists()
+        or destination.is_symlink()
+        or destination.name != source.name
+    ):
+        raise HostConfigurationError("resume checkpoint materialization path is invalid")
+    flags = os.O_RDONLY
+    if hasattr(os, "O_BINARY"):
+        flags |= os.O_BINARY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    destination_flags = os.O_RDWR | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_BINARY"):
+        destination_flags |= os.O_BINARY
+    if hasattr(os, "O_NOFOLLOW"):
+        destination_flags |= os.O_NOFOLLOW
+    source_descriptor: int | None = None
+    destination_descriptor: int | None = None
+    digest = hashlib.sha256()
+    owned_raw = b""
+    try:
+        source_descriptor = os.open(source, flags)
+        source_metadata = os.fstat(source_descriptor)
+        if not stat.S_ISREG(source_metadata.st_mode):
+            raise HostConfigurationError(
+                "resume checkpoint source descriptor is not a regular file"
+            )
+        destination_descriptor = os.open(destination, destination_flags, 0o600)
+        destination_metadata = os.fstat(destination_descriptor)
+        if not stat.S_ISREG(destination_metadata.st_mode):
+            raise HostConfigurationError(
+                "resume checkpoint destination descriptor is not a regular file"
+            )
+        with os.fdopen(source_descriptor, "rb", closefd=False) as reader:
+            with os.fdopen(destination_descriptor, "wb", closefd=False) as writer:
+                while chunk := reader.read(1024 * 1024):
+                    digest.update(chunk)
+                    writer.write(chunk)
+                writer.flush()
+                os.fsync(writer.fileno())
+        if digest.hexdigest() != expected_sha256:
+            raise HostConfigurationError(
+                "resume checkpoint materialization digest mismatch"
+            )
+        os.lseek(destination_descriptor, 0, os.SEEK_SET)
+        owned_chunks: list[bytes] = []
+        owned_digest = hashlib.sha256()
+        while chunk := os.read(destination_descriptor, 1024 * 1024):
+            owned_chunks.append(chunk)
+            owned_digest.update(chunk)
+        if owned_digest.hexdigest() != expected_sha256:
+            raise HostConfigurationError(
+                "resume checkpoint materialized bytes failed verification"
+            )
+        owned_raw = b"".join(owned_chunks)
+        if os.name == "posix":
+            directory_flags = os.O_RDONLY
+            if hasattr(os, "O_DIRECTORY"):
+                directory_flags |= os.O_DIRECTORY
+            directory_descriptor = os.open(destination.parent, directory_flags)
+            try:
+                os.fsync(directory_descriptor)
+            finally:
+                os.close(directory_descriptor)
+    except Exception as error:
+        if source_descriptor is not None:
+            with suppress(OSError):
+                os.close(source_descriptor)
+            source_descriptor = None
+        if destination_descriptor is not None:
+            with suppress(OSError):
+                os.close(destination_descriptor)
+            destination_descriptor = None
+        if isinstance(error, HostConfigurationError):
+            raise
+        raise HostConfigurationError(
+            "resume checkpoint materialization failed"
+        ) from error
+    except BaseException:
+        if source_descriptor is not None:
+            with suppress(OSError):
+                os.close(source_descriptor)
+            source_descriptor = None
+        if destination_descriptor is not None:
+            with suppress(OSError):
+                os.close(destination_descriptor)
+            destination_descriptor = None
+        raise
+    finally:
+        if source_descriptor is not None:
+            os.close(source_descriptor)
+        if destination_descriptor is not None:
+            os.close(destination_descriptor)
+    return destination, owned_raw
+
+
+def _materialize_resume_checkpoints(
+    checkpoint: Path,
+    checkpoint_receipt: CheckpointRecord,
+    destination_directory: Path,
+) -> Path:
+    """Copy only ledger-bound latest/best checkpoint bytes into a new attempt."""
+
+    _reject_symlink_components(
+        destination_directory, "resume checkpoint destination directory"
+    )
+    destination_directory.mkdir(mode=0o700, exist_ok=False)
+    latest, latest_raw = _copy_verified_checkpoint(
+        checkpoint,
+        destination_directory / checkpoint.name,
+        expected_sha256=checkpoint_receipt.checkpoint_payload_sha256,
+    )
+    payload = _decode_runtime_checkpoint_bytes(latest_raw)
+    best_name = payload.get("best_checkpoint_name")
+    best_sha256 = payload.get("best_checkpoint_sha256")
+    if best_name is not None and (
+        type(best_name) is not str
+        or Path(best_name).name != best_name
+        or not best_name.startswith("checkpoint-")
+        or not best_name.endswith(".pt")
+    ):
+        raise HostConfigurationError("resume checkpoint best-checkpoint name is invalid")
+    if best_sha256 is not None and (
+        type(best_sha256) is not str
+        or len(best_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in best_sha256)
+    ):
+        raise HostConfigurationError("resume checkpoint best-checkpoint digest is invalid")
+    if best_name is None and best_sha256 is not None:
+        raise HostConfigurationError("resume checkpoint best digest has no name")
+    if best_name is None or best_name == checkpoint.name:
+        if best_sha256 not in (None, checkpoint_receipt.checkpoint_payload_sha256):
+            raise HostConfigurationError(
+                "resume checkpoint self-selected best digest is inconsistent"
+            )
+        return latest
+    if best_sha256 is None:
+        raise HostConfigurationError("resume checkpoint prior best lacks a digest")
+    best_source = checkpoint.parent / best_name
+    _copy_verified_checkpoint(
+        best_source,
+        destination_directory / best_name,
+        expected_sha256=best_sha256,
+    )
+    return latest
+
+
 def _torch_value_sha256(value: object) -> str:
     stream = io.BytesIO()
     torch.save(value, stream)
     return _sha256_bytes(stream.getvalue())
 
 
-def _load_runtime_checkpoint(path: Path) -> dict[str, object]:
+def _decode_runtime_checkpoint_bytes(raw: bytes) -> dict[str, object]:
     try:
-        payload = torch.load(path, map_location="cpu", weights_only=False)
-    except TypeError:  # torch 2.0 does not expose weights_only.
-        payload = torch.load(path, map_location="cpu")
+        payload = torch.load(
+            io.BytesIO(raw),
+            map_location="cpu",
+            weights_only=True,
+        )
+    except Exception as error:
+        raise HostConfigurationError(
+            "training checkpoint is truncated or unreadable"
+        ) from error
     if type(payload) is not dict:
         raise HostConfigurationError("training checkpoint payload is not an object")
     return payload
+
+
+def _load_runtime_checkpoint(
+    path: Path,
+    *,
+    expected_sha256: str | None = None,
+) -> dict[str, object]:
+    if path.is_symlink() or not path.is_file():
+        raise HostConfigurationError(
+            "training checkpoint must be a regular non-symlink file"
+        )
+    raw = path.read_bytes()
+    if (
+        expected_sha256 is not None
+        and _sha256_bytes(raw) != expected_sha256
+    ):
+        raise HostConfigurationError("training checkpoint artifact digest mismatch")
+    return _decode_runtime_checkpoint_bytes(raw)
 
 
 def _checkpoint_record(
@@ -1085,7 +1269,7 @@ class _LiveAttemptLedger:
 
 
 class PhaseSetHostBackend:
-    """Request-bound backend for real base/residual training and base resume."""
+    """Request-bound backend for real base/residual training and resume."""
 
     def __init__(self, config: HostConfig, request: cli.CLICommandRequest) -> None:
         self._config = config
@@ -1170,6 +1354,9 @@ class PhaseSetHostBackend:
         base_checkpoint: Path,
         periodic_cache: Path,
         stop_after_global_step: int | None,
+        resume_checkpoint: Path | None = None,
+        resume_attempt_root: Path | None = None,
+        resume_record: ResumeRecord | None = None,
     ) -> TrainingReport:
         artifacts = self._config.residual_artifacts
         if artifacts is None:
@@ -1223,6 +1410,9 @@ class PhaseSetHostBackend:
         return runtime.fit(
             train,
             val,
+            resume_checkpoint=resume_checkpoint,
+            resume_attempt_root=resume_attempt_root,
+            resume_record=resume_record,
             stop_after_global_step=stop_after_global_step,
         )
 
@@ -1367,6 +1557,8 @@ class PhaseSetHostBackend:
             raise HostConfigurationError(
                 "resume requires --attempt-dir and --checkpoint"
             )
+        if request.stop_after_global_step is not None:
+            raise HostConfigurationError("resume does not accept a stop parameter")
         _reject_symlink_components(
             request.attempt_directory, "resume attempt directory"
         )
@@ -1402,9 +1594,35 @@ class PhaseSetHostBackend:
                 "resume checkpoint differs from predecessor receipt"
             )
         role, seed, system_id = parse_run_id(predecessor_attempt.run_id)
-        if role != "BASE_QUALIFICATION":
+        base_checkpoint: Path | None = None
+        periodic_cache: Path | None = None
+        if role == "BASE_QUALIFICATION":
+            if request.base_checkpoint is not None or request.periodic_cache is not None:
+                raise HostConfigurationError(
+                    "base resume rejects base-checkpoint and periodic-cache"
+                )
+        elif role == "RESIDUAL_TRAIN":
+            if request.base_checkpoint is None or request.periodic_cache is None:
+                raise HostConfigurationError(
+                    "residual resume requires --base-checkpoint and --periodic-cache"
+                )
+            _reject_symlink_components(
+                request.base_checkpoint, "qualified base checkpoint"
+            )
+            base_checkpoint = request.base_checkpoint.resolve()
+            if not base_checkpoint.is_file():
+                raise HostConfigurationError(
+                    "qualified base checkpoint must be a regular existing file"
+                )
+            _reject_symlink_components(request.periodic_cache, "periodic cache")
+            periodic_cache = request.periodic_cache.resolve()
+            if not periodic_cache.is_dir():
+                raise HostConfigurationError(
+                    "periodic cache must be a regular existing directory"
+                )
+        else:
             raise HostConfigurationError(
-                "initial host resume supports base attempts only"
+                "host resume supports only base and residual attempts"
             )
         if request.system_id is not None and request.system_id != system_id:
             raise HostConfigurationError("resume system differs from predecessor run")
@@ -1443,17 +1661,40 @@ class PhaseSetHostBackend:
             live_ledger = _LiveAttemptLedger(store, resumed_attempt)
             try:
                 live_ledger.start()
-                report = self._execute_base_runtime(
-                    run_id=predecessor_attempt.run_id,
-                    system_id=system_id,
-                    seed=seed,
-                    checkpoint_directory=new_directory / "model-checkpoints",
-                    live_ledger=live_ledger,
-                    resume_checkpoint=checkpoint,
-                    resume_attempt_root=new_directory.parent,
-                    resume_record=resume,
-                    stop_after_global_step=request.stop_after_global_step,
+                materialized_checkpoint = _materialize_resume_checkpoints(
+                    checkpoint,
+                    checkpoint_receipt,
+                    new_directory / "model-checkpoints",
                 )
+                if role == "BASE_QUALIFICATION":
+                    report = self._execute_base_runtime(
+                        run_id=predecessor_attempt.run_id,
+                        system_id=system_id,
+                        seed=seed,
+                        checkpoint_directory=new_directory / "model-checkpoints",
+                        live_ledger=live_ledger,
+                        resume_checkpoint=materialized_checkpoint,
+                        resume_attempt_root=new_directory.parent,
+                        resume_record=resume,
+                        stop_after_global_step=None,
+                    )
+                else:
+                    if base_checkpoint is None or periodic_cache is None:
+                        raise HostConfigurationError(
+                            "residual resume artifacts were not resolved"
+                        )
+                    report = self._execute_residual_runtime(
+                        system_id=system_id,
+                        seed=seed,
+                        checkpoint_directory=new_directory / "model-checkpoints",
+                        live_ledger=live_ledger,
+                        base_checkpoint=base_checkpoint,
+                        periodic_cache=periodic_cache,
+                        stop_after_global_step=None,
+                        resume_checkpoint=materialized_checkpoint,
+                        resume_attempt_root=new_directory.parent,
+                        resume_record=resume,
+                    )
                 live_ledger.ensure_checkpoint(report.latest_checkpoint)
                 live_ledger.stop()
                 return self._close_attempt(

@@ -69,11 +69,15 @@ terminalization but are re-raised. If the failure or terminal cannot be
 persisted (for example, disk failure), the host propagates the error and does
 not manufacture a backend artifact.
 
-`resume` currently accepts only a base attempt.  The predecessor checkpoint
+`resume` accepts base and residual attempts. The predecessor checkpoint
 must be under the same attempt root; the harness verifies its terminal and
 checkpoint receipt, creates a distinct resume-linked attempt with
 `AttemptStore.create_resumed`, and passes that exact `ResumeRecord` to the
-training runtime.
+training runtime. Residual resume also requires `--base-checkpoint` and
+`--periodic-cache`; base resume rejects those arguments. The host verifies and
+copies the latest and any older best checkpoint into the new attempt before
+decoding owned authenticated bytes. Failed partial copies are retained, not
+deleted by a path-based cleanup race. See [resume details](RESIDUAL_RESUME.md).
 
 ## Executable invocation
 
@@ -141,15 +145,16 @@ rights assertion when Embody approval is unknown.
   prepared-data receipt.
 - `run-residual` is wired through the strict qualified-base loader, canonical
   periodic-cache record, energy floors, canonical all-system capacity audit,
-  closed residual constructor, and the same attempt ledger. Residual resume is
-  still rejected: the host has no residual resume dispatch or reconstruction
-  path and does not claim otherwise.
+  closed residual constructor, and the same attempt ledger. Residual resume
+  reconstructs those same dependencies and passes the verified predecessor
+  record to the unchanged runtime. Historical cache-file SHA provenance is not
+  retroactively claimed when only energy floors were consumed.
 - `prepare-data`, `audit-split`, `qualify-base`, `build-periodic-cache`,
   `evaluate`, `bootstrap`, and `render-paper` are not
   implemented here.  Calling one raises before a `BackendExecution` exists.
 - The public `resume` parser has no stop-after-step option. It accepts B0/B1/B2
-  and registered final system IDs; the host currently implements base resume
-  only and recovers identity from the verified attempt ledger.
+  and registered final system IDs; the host implements base and residual resume
+  and recovers identity from the verified attempt ledger.
 - The current public training runtime does not accept a precomputed periodic
   descriptor cache. The host authenticates the complete cache payload and
   consumes its energy floors, but periodic descriptors are recomputed by the

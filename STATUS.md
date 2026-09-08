@@ -18,8 +18,9 @@ evidence, not training results or scientific claims.
 - A separate data-volume Python 3.12.12 / NumPy 2.4.6 / Torch 2.12.0+cu126
   environment is installed with a clean dependency check. The complete Linux
   CPU regression including the private-host lifecycle integration passed:
-  932 tests, 1 skipped, and 39 subtests, in 287.60 s after adding the frozen
-  CLIP adapter. Source bytes were unchanged before and after the full suite.
+  948 tests, 2 skipped, and 39 subtests, in 376.00 s after adding residual
+  host resume. Source bytes were unchanged before and after the full suite.
+  The earlier frozen-CLIP integration passed 932 tests and 39 subtests.
   The earlier host-only suite passed 917 tests and its 25 focused checks.
   This includes synthetic model/lifecycle checks, not main-data training.
 - A separately bounded shared-GPU functionality probe passed FP64 forward and
@@ -36,6 +37,14 @@ evidence, not training results or scientific claims.
   CUDA context-usable total were incorrectly equated; that failed receipt is
   retained. The corrected memory instrumentation did not relax a model gate.
   This does not qualify BF16, the learned group base, or the full training runtime.
+- Separate actual-width B0/B1/B2 FP32 CUDA forward/backward lanes passed the
+  registered parameter census, physical permutation/padding equality, finite
+  gradients, frozen-text preservation, and CPU/CUDA tolerance checks. Their
+  small analytic fixtures are not training or performance results. A subsequent
+  residual retrieval lane failed its frozen-base CPU/CUDA embedding comparison
+  after zero-residual scoring checks. That failed receipt is preserved;
+  inference-backend diagnosis is ongoing, with no tolerance relaxation or
+  frozen-base inference/full-runtime qualification claimed.
 - The native Embody loader and concrete licensed SMPL-X body-22 evaluator are
   implemented. Seven adapter contract tests passed on Linux/Python 3.12.12/
   NumPy 2.4.6; these use explicit fixtures, not licensed assets or main data.
@@ -54,6 +63,11 @@ evidence, not training results or scientific claims.
   the exact retained prefix and EOS, restores caller RNG, and emits text-free
   receipts. See [frozen CLIP text adapter](docs/FROZEN_CLIP_TEXT_ADAPTER.md).
   This does not qualify GPU text execution or real-data training.
+- The exact latest text-adapter commit was downloaded from anonymous codeload,
+  manifest/content/link checked, built offline into a wheel, and installed into
+  a separate server target. All 56 wheel Python modules match the public Git
+  index. Three real CLIP forwards from that installed wheel produced a complete
+  observation byte-identical to the previously verified source copy.
 - Native Linux last-bit Morlet formula drift is repaired using strictly
   verified canonical coefficient bytes, while preserving both original hashes.
   Windows still requires its original exact formula digest; Linux requires its
@@ -66,8 +80,12 @@ evidence, not training results or scientific claims.
   overfull boxes. All result cells and pending author metadata remain explicit.
 - The concrete private-host bridge now connects base/residual training to
   live checkpoint receipts, a periodic heartbeat, and a whole-attempt OS lease.
-  Base resume verifies the predecessor checkpoint chain, including process-loss
-  recovery; residual resume and the remaining host commands are not yet wired.
+  Base and residual resume verify the predecessor checkpoint chain, including
+  process-loss recovery and authenticated latest/older-best materialization.
+  Fifty-one focused server tests passed, including actual tiny residual
+  optimization/checkpoint/resume equality and zero execution on invalid prior
+  checkpoint bytes. See [resume details](docs/RESIDUAL_RESUME.md).
+  The remaining preparation/qualification/evaluation host commands are not yet wired.
   Four actual tiny server fits verified observer behavior without changing
   checkpoint/model/loss/validation outputs. These are engineering fixtures,
   not formal training attempts. GitHub CI passed both Windows runtimes and the
