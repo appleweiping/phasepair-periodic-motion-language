@@ -2,8 +2,9 @@
 
 This module has no execution or scientific authority.  It freezes only the
 weight-independent ``PairChunk`` inputs produced by the existing public
-descriptor streams.  It is intentionally not wired into the host, registered
-constructors, training runtime, checkpoints, or resume path.
+descriptor streams.  The sibling private model candidate consumes its sealed
+reader handle explicitly; the host, training runtime, checkpoints, and resume
+path remain unwired.
 """
 
 from __future__ import annotations
@@ -1013,6 +1014,7 @@ class CachedDescriptorBatch:
 
     cache_key_sha256: str
     batch_input_sha256: str
+    energy_floors_sha256: str
     contexts: tuple[DescriptorWindowContext, ...]
     edge_count: int
     _arrays: tuple[tuple[str, np.ndarray], ...] = field(repr=False)
@@ -1025,6 +1027,7 @@ class CachedDescriptorBatch:
             )
         _lower_sha256(self.cache_key_sha256, "cache_key_sha256")
         _lower_sha256(self.batch_input_sha256, "batch_input_sha256")
+        _lower_sha256(self.energy_floors_sha256, "energy_floors_sha256")
         if (
             type(self.contexts) is not tuple
             or not self.contexts
@@ -1071,7 +1074,7 @@ class CachedDescriptorBatch:
 
 @dataclass(frozen=True, slots=True)
 class CachedPairChunkStream:
-    """A re-iterable exact ``PairChunk`` source for the future model seam."""
+    """A re-iterable exact ``PairChunk`` source for the explicit model seam."""
 
     batch: CachedDescriptorBatch
     stream_kind: DescriptorStreamKind
@@ -1450,6 +1453,7 @@ class PeriodicDescriptorCacheV2:
         return CachedDescriptorBatch(
             cache_key_sha256=cache_key,
             batch_input_sha256=batch_digest,
+            energy_floors_sha256=self.energy_floors_sha256,
             contexts=checked_contexts,
             edge_count=row.edge_count,
             _arrays=tuple((name, arrays[name]) for name in _ARRAY_NAMES),

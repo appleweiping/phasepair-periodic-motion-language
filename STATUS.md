@@ -13,6 +13,22 @@ evidence, not training results or scientific claims.
 
 ## Server continuation
 
+- Explicit reader-backed cached model execution binds the actual complete
+  batch, energy floors and stream family, and enforces the live encoder edge
+  budget before consuming descriptors. The same stream is
+  replayed through forward incidence, backward moments and parameter VJP,
+  without an uncached fallback. The model/cache/control suite passed 98 Linux
+  server tests; full regression passed 1228 tests, 2 existing skips and
+  39 subtests in 401.07 s, source unchanged. These are software fixtures,
+  not real data or measured acceleration. Training-row selection, complete
+  epoch census and checkpoint/resume cache consumption remain unfinished.
+  See [descriptor model integration](docs/PERIODIC_DESCRIPTOR_CACHE_V2.md).
+  A separate static audit also identified a host dispatch defect: new base
+  and residual attempts read two fields absent from the actual CommandIntent.
+  That repair and a real CLI-to-backend regression are in progress; existing
+  synthetic runtime checks must not be treated as proof that this host path
+  already works end to end.
+
 - The complete frozen base-latency runner, exact qualification assembler,
   typed progress observer and durable POSIX journal are implemented. Separately,
   a weight-independent three-stream periodic descriptor cache now preserves
@@ -22,8 +38,9 @@ evidence, not training results or scientific claims.
   descriptor storage/streaming then passed 19 focused tests after a test-only
   hardlink/oversize case split. These are explicit
   software fixtures, not a real nine-run cohort, formal CUDA latency session,
-  winner or licensed-data cache. Production cache-model/training/resume and
-  host qualification command assembly remain unfinished. See
+  winner or licensed-data cache. The later explicit cache-model API is reported
+  above; training/resume cache consumption and host qualification command
+  assembly remain unfinished. See
   [base qualification](docs/BASE_COHORT_QUALIFICATION.md),
   [progress journal](docs/LATENCY_PROGRESS_JOURNAL.md) and
   [descriptor cache](docs/PERIODIC_DESCRIPTOR_CACHE_V2.md).
