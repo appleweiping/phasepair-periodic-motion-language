@@ -1908,6 +1908,7 @@ def _capture_numerical_runtime_flags() -> dict[str, object]:
             torch.is_deterministic_algorithms_warn_only_enabled()
         ),
         "float32_matmul_precision": torch.get_float32_matmul_precision(),
+        "mha_fastpath_enabled": bool(torch.backends.mha.get_fastpath_enabled()),
     }
     for owner, name, _expected in _backend_flag_targets():
         owner_name = (
@@ -1920,6 +1921,7 @@ def _capture_numerical_runtime_flags() -> dict[str, object]:
 def _install_frozen_numerical_runtime() -> None:
     torch.use_deterministic_algorithms(True, warn_only=False)
     torch.set_float32_matmul_precision("highest")
+    torch.backends.mha.set_fastpath_enabled(False)
     for owner, name, expected in _backend_flag_targets():
         setattr(owner, name, expected)
 
@@ -1935,6 +1937,9 @@ def _restore_numerical_runtime_flags(flags: Mapping[str, object]) -> None:
     precision = flags.get("float32_matmul_precision")
     if type(precision) is str:
         torch.set_float32_matmul_precision(precision)
+    mha_fastpath = flags.get("mha_fastpath_enabled")
+    if type(mha_fastpath) is bool:
+        torch.backends.mha.set_fastpath_enabled(mha_fastpath)
     deterministic = flags.get("deterministic_algorithms")
     warn_only = flags.get("deterministic_warn_only")
     if type(deterministic) is bool and type(warn_only) is bool:
@@ -1947,6 +1952,7 @@ def _assert_frozen_numerical_runtime(device: torch.device) -> None:
         "deterministic_algorithms": True,
         "deterministic_warn_only": False,
         "float32_matmul_precision": "highest",
+        "mha_fastpath_enabled": False,
     }
     for owner, name, value in _backend_flag_targets():
         owner_name = (
@@ -2000,6 +2006,7 @@ def training_environment_sha256() -> str:
         "deterministic_algorithms": True,
         "deterministic_warn_only": False,
         "float32_matmul_precision": "highest",
+        "mha_fastpath_enabled": False,
         "backend_flags": {
             (
                 f"{'cuda.matmul' if owner is torch.backends.cuda.matmul else 'cudnn'}.{name}"

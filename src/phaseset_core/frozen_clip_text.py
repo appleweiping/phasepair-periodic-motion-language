@@ -101,6 +101,7 @@ _EXPECTED_RUNTIME: Final = (
     ("interop_threads", "1"),
     ("intraop_threads", "1"),
     ("machine", "x86_64"),
+    ("mha_fastpath_enabled", "false"),
     ("numpy", "2.4.6"),
     ("python", "3.12.12"),
     ("python_implementation", "CPython"),
@@ -155,8 +156,8 @@ _EXPECTED_SOURCE_FILES: Final = (
     ),
     (
         "phaseset_core.training",
-        154_285,
-        "f75b9a59dfc2ccfc04ed5f418fb318f3bff6bc11cfe61021f5ff552d71a2ae7f",
+        154_645,
+        "b1bbc5061a02aac1226ab00fd6eb970bf786cfe32b4d40ff0999dbebaaec60b4",
     ),
 )
 
@@ -358,6 +359,9 @@ def _runtime_facts(
                 "interop_threads": str(torch.get_num_interop_threads()),
                 "intraop_threads": str(torch.get_num_threads()),
                 "machine": platform.machine(),
+                "mha_fastpath_enabled": str(
+                    bool(torch.backends.mha.get_fastpath_enabled())
+                ).lower(),
                 "numpy": str(numpy.__version__),
                 "python": platform.python_version(),
                 "python_implementation": platform.python_implementation(),
@@ -401,6 +405,7 @@ def _real_backend() -> _Backend:
             or torch.get_num_interop_threads() != 1
             or not torch.are_deterministic_algorithms_enabled()
             or torch.get_float32_matmul_precision() != "highest"
+            or torch.backends.mha.get_fastpath_enabled() is not False
         ):
             _hold("HOLD_RUNTIME_IDENTITY")
 

@@ -12,6 +12,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -281,6 +282,40 @@ def test_loader_is_literal_offline_text_only(tmp_path: Path) -> None:
         assert isinstance(call["cache_dir"], str)
     assert _Model.load_calls[0]["low_cpu_mem_usage"] is False
     assert _Model.load_calls[0]["output_loading_info"] is True
+
+
+def test_runtime_identity_binds_mha_fastpath_and_restores_caller_flag() -> None:
+    original = bool(torch.backends.mha.get_fastpath_enabled())
+    versions = SimpleNamespace(__version__="mock-only")
+    try:
+        torch.backends.mha.set_fastpath_enabled(False)
+        disabled = dict(
+            adapter_module._runtime_facts(
+                huggingface_hub=versions,
+                numpy=versions,
+                tokenizers=versions,
+                torch=torch,
+                transformers=versions,
+            )
+        )
+        assert disabled["mha_fastpath_enabled"] == "false"
+        assert dict(adapter_module._EXPECTED_RUNTIME)["mha_fastpath_enabled"] == "false"
+
+        torch.backends.mha.set_fastpath_enabled(True)
+        enabled = dict(
+            adapter_module._runtime_facts(
+                huggingface_hub=versions,
+                numpy=versions,
+                tokenizers=versions,
+                torch=torch,
+                transformers=versions,
+            )
+        )
+        assert enabled["mha_fastpath_enabled"] == "true"
+        assert enabled != disabled
+    finally:
+        torch.backends.mha.set_fastpath_enabled(original)
+    assert bool(torch.backends.mha.get_fastpath_enabled()) is original
 
 
 def test_extra_file_and_snapshot_mutation_fail_without_path_leak(tmp_path: Path) -> None:

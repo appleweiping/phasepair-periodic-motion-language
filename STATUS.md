@@ -44,9 +44,15 @@ evidence, not training results or scientific claims.
   gradients, frozen-text preservation, and CPU/CUDA tolerance checks. Their
   small analytic fixtures are not training or performance results. A subsequent
   residual retrieval lane failed its frozen-base CPU/CUDA embedding comparison
-  after zero-residual scoring checks. That failed receipt is preserved;
-  inference-backend diagnosis is ongoing, with no tolerance relaxation or
-  frozen-base inference/full-runtime qualification claimed.
+  after zero-residual scoring checks. That failed receipt is preserved. A
+  same-weight diagnostic isolated an observed native-MHA-fastpath dependency.
+  The frozen runtime now disables that fastpath on CPU and CUDA and restores
+  caller flags. With unchanged tolerance, the new CUDA retrieval-head seam
+  passed: frozen-base maximum difference 7.153e-7, score difference 4.471e-8,
+  and finite nonzero exercised head gradients. This did not run the periodic
+  core or an optimizer. A subsequent B0 repeat stopped before model creation
+  for insufficient free memory; new-policy B1/B2 and full-runtime qualification
+  remain pending. See [runtime policy](docs/FROZEN_MHA_RUNTIME.md).
 - The native Embody loader and concrete licensed SMPL-X body-22 evaluator are
   implemented. Seven adapter contract tests passed on Linux/Python 3.12.12/
   NumPy 2.4.6; these use explicit fixtures, not licensed assets or main data.
@@ -73,6 +79,9 @@ evidence, not training results or scientific claims.
   the exact retained prefix and EOS, restores caller RNG, and emits text-free
   receipts. See [frozen CLIP text adapter](docs/FROZEN_CLIP_TEXT_ADAPTER.md).
   This does not qualify GPU text execution or real-data training.
+  The MHA-policy successor separately passed 33 focused/949 complete server
+  tests and three official CLIP forwards, preserving the original output
+  golden and RNG under correctly changed code/runtime/receipt identities.
 - The exact latest text-adapter commit was downloaded from anonymous codeload,
   manifest/content/link checked, built offline into a wheel, and installed into
   a separate server target. All 56 wheel Python modules match the public Git
@@ -149,6 +158,7 @@ data, model assets, connection details, and download material are not public.
 - A frozen numerical runtime with deterministic-algorithm errors, highest
   float32 matmul precision, TF32/reduced-precision reductions disabled,
   deterministic cuDNN, a mandatory deterministic CUDA workspace setting, and
+  disabled native MHA fastpath on CPU/CUDA,
   an environment-v2 hardware/runtime/build/thread inventory. Live drift is
   rejected and ambient host flags are restored on exit.
 - A differentiable small-batch Torch CPU skeleton/Morlet oracle for input-

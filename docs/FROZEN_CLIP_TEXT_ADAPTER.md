@@ -136,7 +136,9 @@ The implementation is deliberately pinned to the newly observed CPU identity:
 CPython 3.12.12, Linux x86-64 little-endian, Torch 2.12.0+cu126 with CUDA hidden,
 Transformers 4.57.3, tokenizers 0.22.2, huggingface-hub 0.36.2, and NumPy 2.4.6.
 It requires one intra-op/inter-op thread, deterministic algorithms, and highest
-float32 matmul precision. A different runtime is a new qualification lane, not
+float32 matmul precision, and native MHA fastpath disabled. The caller must
+install that false flag; the adapter checks and records it without changing it.
+A different runtime is a new qualification lane, not
 a permissive fallback.
 
 The exact Transformers model/tokenizer sources and installed
@@ -213,3 +215,11 @@ The full Linux regression with this adapter then passed 932 tests, one skipped,
 and 39 subtests in 287.60 seconds, with unchanged source bytes. The model weights
 are not required for that unit/regression suite; actual loading is verified by
 the separate private snapshot-bound observation above.
+
+After the [frozen MHA policy](FROZEN_MHA_RUNTIME.md) changed the pinned training
+source and runtime identity, a separate server requalification passed 33
+focused tests and 949 full-suite tests, 2 skipped, and 39 subtests. Three actual
+official CLIP forwards preserved both output values above and caller RNG.
+The new receipt contains the new source/runtime identity and false MHA flag;
+it is intentionally not byte-identical to the historical receipt. These checks
+do not qualify CUDA text, full training, or real-data experiments.
