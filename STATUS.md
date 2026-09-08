@@ -13,6 +13,22 @@ evidence, not training results or scientific claims.
 
 ## Server continuation
 
+- The completed-base resolver now reconstructs the exact nine registered
+  successful chains, preserves failed predecessors, authenticates terminal-bound
+  latest and distinct validation-best checkpoint bytes, and revalidates the
+  complete registered state. The complete-capture scorer strictly loads those
+  selected states, derives live parameter censuses and recomputes full-gallery
+  score identities and exact capture-macro fractions. Their integration passed
+  119 focused / 1119 complete server tests with 2 existing skips and 39 subtests.
+  A separate unmocked full-width B0/B1/B2 selected-state-to-gallery witness
+  passed all three lanes in 19.36 s on analytic K2/K3, T200 captures. It uses
+  explicit checkpoint-cursor and text fixtures, not completed formal epochs,
+  real captions or an actual nine-run cohort. Latency, qualification selection
+  and host command assembly remain separate unfinished steps. The merged source
+  then passed 1124 complete Linux server tests, 2 existing skips and 39 subtests
+  in 315.67 s with the source census unchanged. See
+  [completed-base capture scoring](docs/BASE_COHORT_VALIDATION.md).
+
 - Strict known-host SSH login to the registered host now succeeds. The initial
   read-only inventory is complete. Existing workloads were not interrupted.
 - A separate data-volume Python 3.12.12 / NumPy 2.4.6 / Torch 2.12.0+cu126
@@ -116,6 +132,13 @@ evidence, not training results or scientific claims.
   distinction and actual drift. The 103 / 1077 server tests above and the
   unchanged real CLIP cache observation passed. Windows acceptance of this
   correction requires its own GitHub CI result; no failed check was skipped.
+- The next Windows run passed those storage-stat cases but exposed a separate
+  test helper's default CRLF translation. The test-only LF correction and two
+  authenticated CRLF negatives passed 71 focused server tests. Subsequent
+  GitHub Actions for commit `db71a83` passed both Windows Python versions and
+  Ubuntu's public-tree/wheel audit. Both preceding failed runs remain retained;
+  production canonical-byte checks were not relaxed. See
+  [fixture stability](docs/LEGACY_TEST_STABILITY.md).
 - Neither Embody approval nor a licensed neutral model has been observed.
   Open-license Multi-TPC acquisition completed with its official byte count and
   MD5 verified. Its archive inventory has 322 files. The bounded audit confirms
