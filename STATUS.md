@@ -17,20 +17,37 @@ evidence, not training results or scientific claims.
   read-only inventory is complete. Existing workloads were not interrupted.
 - A separate data-volume Python 3.12.12 / NumPy 2.4.6 / Torch 2.12.0+cu126
   environment is installed with a clean dependency check. The complete Linux
-  CPU regression passed: 900 tests, 1 skipped, and 39 subtests, in 311.13 s.
+  CPU regression including the private-host lifecycle integration passed:
+  917 tests, 1 skipped, and 39 subtests, in 345.97 s. Source bytes were unchanged
+  before and after the full suite. Its separate 25 focused tests also passed.
   This includes synthetic model/lifecycle checks, not main-data training.
 - A separately bounded shared-GPU functionality probe passed FP64 forward and
   FP32 forward/backward using 8x8 tensors. It did not stop existing workloads
   and does not qualify BF16, model execution, performance, or the full runtime.
+- A subsequent actual-width PhaseSet periodic-core CUDA observation passed
+  with 512-dimensional tokens and a 256-dimensional hidden layer: K2/K3
+  forward/backward, actor permutations, K2 topology output/gradients as exact
+  positive zero, and K13 (78 edges) bitwise equality at chunks 64/128/256.
+  Maximum observed CPU/CUDA token difference was 1.431e-6 within the frozen
+  FP32 tolerance. The engineering fixture peaked at 80,722,944 allocated bytes
+  under a 2 GiB allocator cap; this is not a performance benchmark. Its first
+  attempt stopped before model construction because physical FB total and
+  CUDA context-usable total were incorrectly equated; that failed receipt is
+  retained. The corrected memory instrumentation did not relax a model gate.
+  This does not qualify BF16, the learned group base, or the full training runtime.
 - The native Embody loader and concrete licensed SMPL-X body-22 evaluator are
   implemented. Seven adapter contract tests passed on Linux/Python 3.12.12/
   NumPy 2.4.6; these use explicit fixtures, not licensed assets or main data.
 - Neither Embody approval nor a licensed neutral model has been observed.
   Open-license Multi-TPC acquisition completed with its official byte count and
-  MD5 verified. Its archive inventory has 322 files; format conversion remains
-  under audit. It is supplementary conversation data, never replacement
+  MD5 verified. Its archive inventory has 322 files. The bounded audit confirms
+  19 Euler rotation triplets plus three translation anchors, not body22 joint
+  positions, and unresolved modality-alignment/group-identity details. It is
+  supplementary conversation data, never replacement
   confirmatory data. The pinned CLIP snapshot's eight files also match the
-  previously acquired official SHA-256 values; model qualification is separate.
+  previously acquired official SHA-256 values. Actual frozen CLIP text CPU
+  loading and two public-caption forwards passed, with bitwise repeat outputs
+  and unchanged RNG. This does not qualify GPU execution or real data training.
 - Native Linux last-bit Morlet formula drift is repaired using strictly
   verified canonical coefficient bytes, while preserving both original hashes.
   Windows still requires its original exact formula digest; Linux requires its
@@ -41,6 +58,14 @@ evidence, not training results or scientific claims.
   ICASSP 2027 template: five pages, technical content through page four,
   references-only page five, all fonts embedded, no unresolved citations or
   overfull boxes. All result cells and pending author metadata remain explicit.
+- The concrete private-host bridge now connects base/residual training to
+  live checkpoint receipts, a periodic heartbeat, and a whole-attempt OS lease.
+  Base resume verifies the predecessor checkpoint chain, including process-loss
+  recovery; residual resume and the remaining host commands are not yet wired.
+  Four actual tiny server fits verified observer behavior without changing
+  checkpoint/model/loss/validation outputs. These are engineering fixtures,
+  not formal training attempts. GitHub CI passed both Windows runtimes and the
+  Ubuntu public-tree/wheel audit for the integration commit.
 
 This continuation is not a completed scientific release. Private receipts,
 data, model assets, connection details, and download material are not public.

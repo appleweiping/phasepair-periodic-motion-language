@@ -96,8 +96,11 @@ novel signal-processing estimators.
 \section{PhaseSet}
 \subsection{Input and deterministic periodic relations}
 An input is a dynamically padded tensor of $K\!\geq\!2$ actors, 200 frames,
-and 22 body joints, with actor/joint/frame masks. A shared 512D actor encoder
-uses no actor ID. Motion is resampled to 20 Hz; an independently hashed 20-Hz
+and 22 body joints, with actor/joint/frame masks. The group base uses a shared
+512D actor encoder with no actor ID. In parallel, the periodic branch extracts
+fixed, mask-aware body-motion activity from skeleton coordinates; it does not
+apply Morlet kernels to learned base features. Motion is resampled to 20 Hz;
+an independently hashed 20-Hz
 Morlet bank retains PhasePair's six physical center frequencies while its
 legacy 30-Hz tap bytes remain unchanged. Each response is computed once per actor. For every
 valid unordered pair $\{i,j\}$ and band $b$, the inherited directed 13D
@@ -134,7 +137,8 @@ gradients are exact positive zero.
 \begin{figure*}[t]
 \centering
 \includegraphics[width=0.96\textwidth]{../figures/phaseset_architecture.pdf}
-\caption{Registered architecture (conceptual, no-result). Directed relations
+\caption{Implementation architecture (no-result). Fixed motion activity and
+the qualified learned group base are parallel paths. Directed relations
 feed a symmetric pair mean and incident-moment topology path; a hard $K{=}2$
 gate preserves dyadic equivalence. Six motion tokens align with six semantic
 text-band tokens on top of the frozen qualified base score.}
@@ -146,9 +150,9 @@ Let $q_b$ be the canonical masked mean of valid node outputs. The band token is
 g_b=m_b\,C\!\left(\bar p_b+\tanh(\lambda_b)q_b\right),
 \label{eq:token}
 \end{equation}
-where $m_b$ is the band-valid mask and $C_b$ is the common postprocessor. The
+where $m_b$ is the band-valid mask and $C$ is the common postprocessor. The
 capacity-matched pair-only control passes exact positive zero for $q_b$ through
-the same $C_b$. Fixed-tree float64 microblock reduction, compensated
+the same $C$. Fixed-tree float64 microblock reduction, compensated
 microblock accumulation, and fixed-order Chan merges make the output invariant
 to registered chunk sizes.
 
@@ -208,10 +212,8 @@ that mean with permutation-invariant pooling by multihead attention (PMA). B2
 uses four alternating blocks: temporal self-attention is applied independently
 with shared weights, then each frame performs set attention across the valid
 actors, followed by PMA. No candidate receives an actor index, actor-specific
-tower, or actor-0 reference. The architecture decision uses the three-seed
-validation mean, not per-seed winners; an exact tie is resolved only by the
-registered resource order. Thus every residual system for a seed reads the
-same immutable winning-base checkpoint and cache.
+tower, or actor-0 reference. Every residual system reads the same immutable
+winning-base checkpoint and cache for its seed.
 
 Systems 01--08 each run at the same three seeds (24 more attempts), for a
 formal total of \textbf{33 training attempts}. Bases use the registered AdamW

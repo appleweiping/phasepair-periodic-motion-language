@@ -56,11 +56,17 @@ receipt. The script needs no `latexmk` or Perl and disables TeX shell escape.
 
 Verified on 2026-09-08 with MiKTeX pdfTeX/BibTeX: five pages, technical content
 ends on page 4, page 5 contains only references, no undefined references or
-overfull boxes, and all 20 font entries embedded. Two underfull horizontal
+overfull boxes, and all 18 font entries embedded with no Type 3 fallback. Two underfull horizontal
 boxes, one underfull vertical box, and a nonfatal `balance` warning remain
 reported in the logs. All 57 `HOLD` result cells remain visible. Inspect page
 boundaries, fonts, figures, citations, and claims after every content change.
 A generated PDF remains a `NO_RESULT / NOT_FOR_SUBMISSION` artifact.
+
+`BUILD_RECEIPT.json` binds the checked source, bibliography, official styles,
+and PDF by SHA-256. Both diagrams now have native editable PowerPoint objects,
+alongside draw.io/PDF/SVG/PNG exports. The architecture and method text show the
+implemented parallel fixed-activity periodic branch and learned group base;
+they do not assert that Morlet reads learned base features.
 
 ## Non-negotiable language
 
