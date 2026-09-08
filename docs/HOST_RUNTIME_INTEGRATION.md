@@ -178,12 +178,21 @@ from phaseset_core.host import main
 raise SystemExit(main(PUBLIC_CLI_ARGUMENTS, config_path=PRIVATE_HOST_CONFIG))
 ```
 
-The private host config schema is `phaseset-private-host-v1`.  It points to a
+The original private host config schema is `phaseset-private-host-v1`. It points to a
 prepared index, an existing receipt record plus the exact artifact file for
 each receipt digest, the installed source-tree digest, and runtime facts
 (device, BF16 qualification decision, edge budget, checkpoint cadence, and
 resume metadata).  Paths may be absolute or relative to the private config.
 They are never serialized by the public CLI.
+
+The backward-compatible `phaseset-private-host-v2` requires the
+closed `base_qualification` configuration. Its `qualify-base` implementation
+resolves the actual nine terminal histories, rescoring their selected
+checkpoints on complete validation captures before an independent CUDA
+latency observation and qualification assembly. See
+[host base qualification](HOST_BASE_QUALIFICATION.md) for the exact command,
+latency in-process wall-time bound, runtime admission, evidence and failure semantics. Existing
+v1 configurations are not silently upgraded or assigned a qualification.
 
 For residual runs, the optional `residual` object points to the one canonical
 base-qualification artifact and one canonical capacity-audit artifact per
@@ -219,17 +228,20 @@ rights assertion when Embody approval is unknown.
   reconstructs those same dependencies and passes the verified predecessor
   record to the unchanged runtime. Historical cache-file SHA provenance is not
   retroactively claimed when only energy floors were consumed.
-- `prepare-data`, `audit-split`, `qualify-base`, `build-periodic-cache`,
+- `prepare-data`, `audit-split`, `build-periodic-cache`,
   `evaluate`, `bootstrap`, and `render-paper` are not
   implemented here.  Calling one raises before a `BackendExecution` exists.
 - The public `resume` parser has no stop-after-step option. It accepts B0/B1/B2
   and registered final system IDs; the host implements base and residual resume
   and recovers identity from the verified attempt ledger.
-- The current public training runtime does not accept a precomputed periodic
-  descriptor cache. The host authenticates the complete cache payload and
-  consumes its energy floors, but periodic descriptors are recomputed by the
-  model path. Wiring cached descriptors into training is a lower-level public
-  runtime gap and must not be represented as cache consumption in reports.
+- The residual encoder and complete-capture evaluator now expose explicit
+  reader-backed descriptor-cache APIs. The training loop and this host's
+  residual construction/checkpoint/resume path do not yet consume those APIs.
+  The existing host cache argument authenticates the complete cache payload
+  and consumes its energy floors, while its model path still recomputes
+  descriptors. That historical behavior must not be represented as descriptor
+  cache consumption in reports. See the
+  [complete-capture cache plan](PERIODIC_CAPTURE_TRAINING_CACHE.md).
 - A hard power loss before the first atomic runtime checkpoint has no resumable
   payload. The host refuses such a resume instead of manufacturing a checkpoint
   receipt. SIGKILL/power loss cannot write a terminal synchronously; terminal
@@ -294,3 +306,10 @@ Negative admissions with changed matrix, command census or handler digest
 leave the snapshot unbound and still allow the subsequent canonical request.
 These tests close the concrete missing-field/poisoning defects, not a complete
 licensed-data CLI training run or the unimplemented commands listed above.
+
+The host qualification integration passed 131 focused Linux server tests in
+37.07 seconds with source unchanged. Tests enter the real CLI/factory/adapter/
+backend path, validate typed holds and independently recheck completion
+artifacts. A preceding run with seven fixture/API failures is retained; only
+the tests changed for this rerun, not production code. These are software
+fixtures, not nine trained bases, formal CUDA latency rows or a selected base.

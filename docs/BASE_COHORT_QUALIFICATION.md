@@ -118,6 +118,27 @@ independently retained execution evidence through the existing backend flow.
 This does not introduce an extra user-signature requirement, turn hashes into
 data rights, or authorize access to sealed test data.
 
+## Private host composition
+
+The [host qualification controller](HOST_BASE_QUALIFICATION.md) implements the
+private orchestration seam from the existing `qualify-base` CLI request to this
+resolver, scorer, latency runner, journal and assembler. The CLI still supplies
+only the attempt root; it cannot submit a winner, score, timing, parameter
+count, checkpoint choice or authorization object.
+
+Before the scorer places a model on CUDA, the controller applies the same
+registered-device identity, minimum free-memory and allocator-cap policy used
+by latency. After scoring it releases scorer references, synchronizes, clears
+this process's cuBLAS workspaces, empties the allocator cache and retains the
+exact-zero guard before starting the independent latency session. A scoring
+failure remains primary even if cleanup also fails, and resource causes remain
+HOLD outcomes rather than being converted into model-quality failures.
+
+After a complete journal-agreeing latency result, the controller calls the
+existing assembler, retains its exact bytes and lets the existing production
+adapter recompute them before the backend callback. The controller creates no
+new scientific selector or human-authorization mechanism.
+
 ## Progress, verification and remaining work
 
 The optional typed observer connects to the
@@ -133,5 +154,9 @@ overlap and must not be added as independent experiments.
 
 Tests use explicit software fixtures and injected observations. No actual
 81-visit CUDA timing session, real completed training cohort, qualified winner
-or host `qualify-base` command completion is claimed. Private host command
-composition and all data-dependent execution remain unfinished.
+or data-dependent host `qualify-base` completion is claimed. The host controller
+passed 131 focused server tests in 37.07 seconds with source unchanged,
+including the real CLI-to-backend path and a structurally supplied qualification
+callback. The first attempt's 123 passes and seven fixture API failures remain
+retained. Its correction changed only the test file, not production guards.
+These software tests did not produce real nine-run inputs or a qualified winner.

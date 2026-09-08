@@ -125,9 +125,13 @@ The [prepared-window cache plan](PERIODIC_TRAINING_CACHE_PLAN.md) now admits
 an exact complete 20-epoch training census and one val/epoch-zero census for
 each official seed. Its selector reopens the authenticated reader on every
 request; the reader exposes only a read-only complete key-census tuple.
-This is an engineering window-validation seam, not holistic capture
-validation. Training initialization, complete-capture cache composition and
-checkpoint/resume consumption still require explicit integration.
+This remains an engineering window-validation seam, not holistic capture
+validation. A separate [complete-capture plan](PERIODIC_CAPTURE_TRAINING_CACHE.md)
+now binds the same complete training census to every actual holistic
+validation window. The residual system has an explicit reader-backed cached
+encoding method, and [capture validation](CAPTURE_VALIDATION.md) can consume
+that plan through its shared complete-gallery evaluator. Training-loop,
+initialization and checkpoint/resume consumption still require integration.
 The model checks actual batch bytes but does not invent source window ordinals
 or silently select a different epoch/yaw context. Host preparation must supply
 the correct already verified reader handle. No real-data cache, acceleration,

@@ -10,11 +10,11 @@ window identity.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from fractions import Fraction
 import hashlib
 import json
-from typing import Final, Literal
+from dataclasses import dataclass, field
+from fractions import Fraction
+from typing import TYPE_CHECKING, Final, Literal
 
 import numpy as np
 import torch
@@ -47,6 +47,11 @@ from .training import (
     _frozen_numerical_runtime,
     resolve_precision,
 )
+
+if TYPE_CHECKING:
+    from .periodic_capture_training_cache import (
+        PeriodicDescriptorCaptureTrainingPlan,
+    )
 
 
 STATUS: Final = "CAPTURE_VALIDATION_SEAM_AUTHORITY0"
@@ -660,6 +665,75 @@ def run_capture_validation(
     translated to ``RESOURCE_LIMIT``.
     """
 
+    return _run_capture_validation_core(
+        system,
+        config,
+        source,
+        descriptor_plan=None,
+        max_encoded_bytes=max_encoded_bytes,
+        max_cuda_static_tensor_bytes=max_cuda_static_tensor_bytes,
+    )
+
+
+def run_capture_validation_cached(
+    system: ResidualRetrievalSystem,
+    config: TrainingConfig,
+    source: CaptureValidationSource,
+    descriptor_plan: PeriodicDescriptorCaptureTrainingPlan,
+    *,
+    max_encoded_bytes: int = DEFAULT_MAX_ENCODED_BYTES,
+    max_cuda_static_tensor_bytes: int = DEFAULT_MAX_CUDA_STATIC_TENSOR_BYTES,
+) -> CaptureValidationResult:
+    """Run the same full-capture oracle using explicit verified descriptor streams."""
+
+    # Local import avoids a module cycle: the plan owns capture-source checks.
+    from .periodic_capture_training_cache import (
+        PeriodicDescriptorCaptureTrainingPlan,
+    )
+
+    if type(system) is not ResidualRetrievalSystem:
+        raise CaptureValidationError(
+            "cached capture validation requires exact ResidualRetrievalSystem"
+        )
+    if type(config) is not TrainingConfig:
+        raise CaptureValidationError("config must be exact TrainingConfig")
+    if type(descriptor_plan) is not PeriodicDescriptorCaptureTrainingPlan:
+        raise CaptureValidationError(
+            "descriptor_plan must be an admitted exact capture training plan"
+        )
+    if (
+        config.stage != "residual"
+        or descriptor_plan.system_id != system.system_id
+        or descriptor_plan.config_sha256 != config.sha256
+        or descriptor_plan.seed != config.seed
+        or descriptor_plan.epochs != config.epochs
+        or descriptor_plan.edge_budget != config.edge_budget
+    ):
+        raise CaptureValidationError(
+            "descriptor plan differs from the residual system or training config"
+        )
+    checked_source = descriptor_plan.validate_capture_validation_source(source)
+    return _run_capture_validation_core(
+        system,
+        config,
+        checked_source,
+        descriptor_plan=descriptor_plan,
+        max_encoded_bytes=max_encoded_bytes,
+        max_cuda_static_tensor_bytes=max_cuda_static_tensor_bytes,
+    )
+
+
+def _run_capture_validation_core(
+    system: BaseRetrievalSystem | ResidualRetrievalSystem,
+    config: TrainingConfig,
+    source: CaptureValidationSource,
+    *,
+    descriptor_plan: PeriodicDescriptorCaptureTrainingPlan | None,
+    max_encoded_bytes: int,
+    max_cuda_static_tensor_bytes: int,
+) -> CaptureValidationResult:
+    """Shared full-capture implementation; only periodic descriptor acquisition varies."""
+
     if not isinstance(system, (BaseRetrievalSystem, ResidualRetrievalSystem)):
         raise CaptureValidationError("system must use a registered retrieval interface")
     if type(config) is not TrainingConfig:
@@ -722,11 +796,23 @@ def run_capture_validation(
                 base_rows: list[np.ndarray] = []
                 token_rows: list[np.ndarray] = []
                 mask_rows: list[np.ndarray] = []
-                for window in capture.windows:
+                for window_position, window in enumerate(capture.windows):
                     with _autocast_context(precision, device):
                         if residual:
                             assert isinstance(system, ResidualRetrievalSystem)
-                            tokens, band_mask = system.encode_trainable(window.groups)
+                            if descriptor_plan is None:
+                                tokens, band_mask = system.encode_trainable(window.groups)
+                            else:
+                                descriptor_stream = (
+                                    descriptor_plan.open_capture_validation_window(
+                                        capture,
+                                        window_position,
+                                    )
+                                )
+                                tokens, band_mask = system.encode_trainable_cached(
+                                    window.groups,
+                                    descriptor_stream,
+                                )
                             base = system.encode_frozen_base(window.groups)
                         else:
                             assert isinstance(system, BaseRetrievalSystem)
@@ -898,7 +984,8 @@ def run_capture_validation(
 _CAPTURE_RUNTIME_BINDINGS = tuple(
     (name, globals()[name])
     for name in (
-        "CaptureValidationSource", "run_capture_validation", "_snapshot_source",
+        "CaptureValidationSource", "run_capture_validation",
+        "run_capture_validation_cached", "_run_capture_validation_core", "_snapshot_source",
         "_capture_fractions", "pool_capture_windows", "capture_r1_contributions",
         "validate_retrieval_dataset", "variable_positive_symmetric_infonce",
     )
@@ -921,4 +1008,5 @@ __all__ = [
     "CaptureValidationSource",
     "CaptureValidationWindow",
     "run_capture_validation",
+    "run_capture_validation_cached",
 ]

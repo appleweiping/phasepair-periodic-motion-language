@@ -7,8 +7,8 @@ microbatches; missing or mismatched artifacts stop at the repository's
 existing ``ExecutionHold`` boundary.
 
 The implemented command surface is intentionally small: ``preflight``,
-``run-base``, ``run-residual``, and base/residual ``resume``. Other commands raise
-before a ``BackendExecution`` can be manufactured.
+``run-base``, ``qualify-base``, ``run-residual``, and base/residual ``resume``.
+Other commands raise before a ``BackendExecution`` can be manufactured.
 """
 
 from __future__ import annotations
@@ -32,6 +32,15 @@ from typing import BinaryIO
 import numpy as np
 import torch
 from phaseset_core import cli
+from phaseset_core.base_qualification_host import (
+    CONFIG_SCHEMA as BASE_QUALIFICATION_CONTROLLER_SCHEMA,
+    HostBaseQualificationAuthentication,
+    HostBaseQualificationConfig,
+    HostBaseQualificationError,
+    load_base_attempt_registry,
+    run_host_base_qualification,
+)
+from phaseset_core.base_cohort_resolver import BaseCohortAdmission
 from phaseset_core.capture_prepared_storage import (
     CapturePreparedStorageError,
     CaptureStorageLimits,
@@ -73,6 +82,7 @@ from phaseset_core.prepared_data_v2 import (
 )
 from phaseset_core.production import (
     BackendExecution,
+    PrivateBaseQualificationAuthorization,
     PrivateReceiptAssertions,
     ProductionRuntimeAdapter,
 )
@@ -91,6 +101,7 @@ from phaseset_core.training import (
 )
 
 HOST_CONFIG_SCHEMA = "phaseset-private-host-v1"
+HOST_CONFIG_QUALIFICATION_SCHEMA = "phaseset-private-host-v2"
 PREPARED_INDEX_SCHEMA = "phaseset-prepared-index-v1"
 PREPARED_SPLIT_SCHEMA = "phaseset-prepared-training-split-v1"
 CAPTURE_VALIDATION_INDEX_SCHEMA = "phaseset-host-capture-validation-index-v1"
@@ -129,6 +140,32 @@ RECEIPT_DIGEST_FIELDS = (
 
 class HostConfigurationError(ValueError):
     """The private host configuration or prepared seam is not closed."""
+
+
+def _qualify_base_request_is_closed(request: cli.CLICommandRequest) -> bool:
+    """Whether qualify-base carries exactly its one factory-only path."""
+
+    return request.terminal_root is not None and all(
+        value is None
+        for value in (
+            request.run_id,
+            request.seed,
+            request.split,
+            request.system_id,
+            request.source_manifest,
+            request.prepared_root,
+            request.split_manifest,
+            request.base_checkpoint,
+            request.periodic_cache,
+            request.cache_root,
+            request.checkpoint_directory,
+            request.resume_checkpoint,
+            request.stop_after_global_step,
+            request.evaluation_manifest,
+            request.statistical_report,
+            request.attempt_directory,
+        )
+    )
 
 
 class _AttemptLease:
@@ -719,6 +756,7 @@ class HostConfig:
     resume_retry_class: str
     corrective_change_sha256: str
     residual_artifacts: ResidualArtifacts | None
+    base_qualification: HostBaseQualificationConfig | None = None
 
     @classmethod
     def load(cls, path: str | Path) -> HostConfig:
@@ -731,13 +769,22 @@ class HostConfig:
             "schema",
             "source_tree_sha256",
         }
-        if frozenset(value) not in {
-            frozenset(required_keys),
-            frozenset(required_keys | {"residual"}),
-        }:
+        optional_keys = frozenset({"residual", "base_qualification"})
+        if not required_keys.issubset(value) or not set(value).issubset(
+            required_keys | optional_keys
+        ):
             raise HostConfigurationError("host configuration keys are not closed")
-        if value["schema"] != HOST_CONFIG_SCHEMA:
+        if value["schema"] not in {
+            HOST_CONFIG_SCHEMA,
+            HOST_CONFIG_QUALIFICATION_SCHEMA,
+        }:
             raise HostConfigurationError("host configuration schema is not registered")
+        if (value["schema"] == HOST_CONFIG_SCHEMA) != (
+            "base_qualification" not in value
+        ):
+            raise HostConfigurationError(
+                "base qualification configuration requires private host schema v2"
+            )
         receipts = value["receipts"]
         runtime = value["runtime"]
         if type(receipts) is not dict or type(runtime) is not dict:
@@ -800,6 +847,65 @@ class HostConfig:
                     for seed in SEEDS
                 },
             )
+        qualification_value = value.get("base_qualification")
+        base_qualification: HostBaseQualificationConfig | None = None
+        if qualification_value is not None:
+            if type(qualification_value) is not dict:
+                raise HostConfigurationError(
+                    "base qualification configuration must be an object"
+                )
+            _closed_keys(
+                qualification_value,
+                {
+                    "journal_parent",
+                    "latency_protocol_sha256",
+                    "launcher_sha256",
+                    "output_root",
+                    "registered_cuda_uuid",
+                    "registry_path",
+                    "registry_sha256",
+                    "schema",
+                    "session_id",
+                    "wall_timeout_seconds",
+                },
+                "base qualification configuration",
+            )
+            if qualification_value["schema"] != BASE_QUALIFICATION_CONTROLLER_SCHEMA:
+                raise HostConfigurationError(
+                    "base qualification controller schema is not registered"
+                )
+            try:
+                base_qualification = HostBaseQualificationConfig(
+                    registry_path=_resolve_config_path(
+                        config_path.parent,
+                        qualification_value["registry_path"],
+                        "base attempt registry",
+                    ),
+                    registry_sha256=qualification_value["registry_sha256"],
+                    output_root=_resolve_config_path(
+                        config_path.parent,
+                        qualification_value["output_root"],
+                        "base qualification output root",
+                    ),
+                    journal_parent=_resolve_config_path(
+                        config_path.parent,
+                        qualification_value["journal_parent"],
+                        "base latency journal parent",
+                    ),
+                    session_id=qualification_value["session_id"],
+                    registered_cuda_uuid=qualification_value["registered_cuda_uuid"],
+                    latency_protocol_sha256=qualification_value[
+                        "latency_protocol_sha256"
+                    ],
+                    launcher_sha256=qualification_value["launcher_sha256"],
+                    wall_timeout_seconds=qualification_value[
+                        "wall_timeout_seconds"
+                    ],
+                )
+            except (HostBaseQualificationError, TypeError, ValueError) as error:
+                raise HostConfigurationError(
+                    "base qualification configuration is invalid"
+                ) from error
         return cls(
             path=config_path,
             prepared_index=_resolve_config_path(
@@ -824,6 +930,7 @@ class HostConfig:
             resume_retry_class=runtime["resume_retry_class"],
             corrective_change_sha256=corrective,
             residual_artifacts=residual_artifacts,
+            base_qualification=base_qualification,
         )
 
     def load_receipts(self) -> PrivateReceiptAssertions:
@@ -859,6 +966,60 @@ class HostConfig:
             "DATA",
         }:
             raise HostConfigurationError("runtime resume_retry_class is not registered")
+
+    def validate_base_qualification_request(
+        self,
+        request: cli.CLICommandRequest,
+    ) -> None:
+        """Close the qualify-base private inputs without running a model."""
+
+        if request.command != "qualify-base":
+            return
+        qualification = self.base_qualification
+        if qualification is None:
+            raise HostConfigurationError(
+                "qualify-base requires a base qualification controller configuration"
+            )
+        if not _qualify_base_request_is_closed(request):
+            raise HostConfigurationError(
+                "qualify-base accepts only one --terminal-root input"
+            )
+        if request.terminal_root is None:  # narrowed by the closed-input predicate
+            raise AssertionError("closed qualify-base request lost terminal_root")
+        for value, label in (
+            (request.terminal_root, "base terminal root"),
+            (qualification.output_root, "base qualification output root"),
+            (qualification.journal_parent, "base latency journal parent"),
+        ):
+            _reject_symlink_components(value, label)
+            if not value.is_dir():
+                raise HostConfigurationError(f"{label} must be an existing directory")
+        if request.terminal_root.resolve() in {
+            qualification.output_root.resolve(),
+            qualification.journal_parent.resolve(),
+        }:
+            raise HostConfigurationError(
+                "attempt, qualification-output, and journal roots must be distinct"
+            )
+        if qualification.output_root.resolve() == qualification.journal_parent.resolve():
+            raise HostConfigurationError(
+                "qualification output and journal roots must be distinct"
+            )
+        try:
+            load_base_attempt_registry(
+                qualification.registry_path,
+                expected_sha256=qualification.registry_sha256,
+            )
+        except (HostBaseQualificationError, OSError, TypeError, ValueError) as error:
+            raise HostConfigurationError(
+                "base attempt registry manifest is invalid"
+            ) from error
+        output = qualification.output_root / qualification.session_id
+        journal = qualification.journal_parent / qualification.session_id
+        if output.exists() or output.is_symlink() or journal.exists() or journal.is_symlink():
+            raise HostConfigurationError(
+                "base qualification session output or journal already exists"
+            )
 
     def load_sources(
         self,
@@ -1601,6 +1762,12 @@ class PhaseSetHostBackend:
         self._config = config
         self._request = request
         self._admission_request: RuntimeAdmissionRequest | None = None
+        self._authenticated_adapter_sha256: str | None = None
+        self._qualification_adapter: ProductionRuntimeAdapter | None = None
+        self._qualification_authentication: (
+            HostBaseQualificationAuthentication | None
+        ) = None
+        self._qualification_intent: CommandIntent | None = None
         self.backend_sha256 = _sha256_bytes(Path(__file__).read_bytes())
 
     def authenticate(
@@ -1609,7 +1776,6 @@ class PhaseSetHostBackend:
         receipts: PrivateReceiptAssertions,
         adapter_sha256: str,
     ) -> bool:
-        del adapter_sha256
         if receipts != self._config.load_receipts():
             return False
         plan = build_experiment_plan()
@@ -1628,9 +1794,52 @@ class PhaseSetHostBackend:
         # parsed CLI command.  Retain the exact runner-created admission request so
         # attempt ledgers never read fields that CommandIntent does not define.
         if self._admission_request is not None:
-            return request == self._admission_request
+            return (
+                request == self._admission_request
+                and adapter_sha256 == self._authenticated_adapter_sha256
+            )
         self._admission_request = request
+        self._authenticated_adapter_sha256 = _lower_sha256(
+            adapter_sha256,
+            "production adapter SHA-256",
+        )
         return True
+
+    def bind_qualification_adapter(self, adapter: ProductionRuntimeAdapter) -> None:
+        """Bind the one adapter whose private slot receives actual derived evidence."""
+
+        if self._request.command != "qualify-base":
+            raise HostConfigurationError(
+                "base qualification adapter binding is command-specific"
+            )
+        if type(adapter) is not ProductionRuntimeAdapter:
+            raise TypeError("qualification adapter must be exact ProductionRuntimeAdapter")
+        if getattr(adapter, "_backend", None) is not self:
+            raise HostConfigurationError("qualification adapter belongs to another backend")
+        if self._qualification_adapter is not None:
+            raise HostConfigurationError("qualification adapter was already bound")
+        self._qualification_adapter = adapter
+
+    def authenticate_base_qualification(
+        self,
+        intent: CommandIntent,
+        authorization: PrivateBaseQualificationAuthorization,
+        qualification_sha256: str,
+        adapter_sha256: str,
+    ) -> bool:
+        """Match production recomputation to the controller's retained real bytes."""
+
+        expected = self._qualification_authentication
+        return (
+            intent.command == "qualify-base"
+            and intent == self._qualification_intent
+            and type(expected) is HostBaseQualificationAuthentication
+            and expected.verifies(
+                authorization,
+                qualification_sha256=qualification_sha256,
+                adapter_sha256=adapter_sha256,
+            )
+        )
 
     def _attempt_plan_bindings(self) -> tuple[str, str, str]:
         request = self._admission_request
@@ -1655,6 +1864,8 @@ class PhaseSetHostBackend:
             return self._run_residual(intent)
         if intent.command == "resume":
             return self._resume_base(intent)
+        if intent.command == "qualify-base":
+            return self._qualify_base(intent)
         raise HostConfigurationError(
             f"host harness does not implement command {intent.command}; no result was produced"
         )
@@ -1670,6 +1881,91 @@ class PhaseSetHostBackend:
             checkpoint_every_updates=self._config.checkpoint_every_updates,
             synthetic_contract=False,
         )
+
+    def _qualify_base(self, intent: CommandIntent) -> BackendExecution:
+        request = self._request
+        qualification = self._config.base_qualification
+        adapter = self._qualification_adapter
+        admission_request = self._admission_request
+        if (
+            qualification is None
+            or adapter is None
+            or admission_request is None
+            or self._authenticated_adapter_sha256 is None
+        ):
+            raise HostConfigurationError(
+                "qualify-base controller is not fully admitted and bound"
+            )
+        if (
+            not _qualify_base_request_is_closed(request)
+            or intent.run_id is not None
+            or intent.seed is not None
+            or intent.split is not None
+        ):
+            raise HostConfigurationError(
+                "qualify-base accepts only the registered terminal root"
+            )
+        if request.terminal_root is None:  # narrowed by the closed-input predicate
+            raise AssertionError("closed qualify-base request lost terminal_root")
+        train, val = self._config.load_sources()
+        if type(val) is not CaptureValidationSource or val.split != "val":
+            raise HostConfigurationError(
+                "qualify-base requires the complete holistic capture val source"
+            )
+        cohort_admission = BaseCohortAdmission(
+            plan_sha256=admission_request.plan_sha256,
+            matrix_sha256=admission_request.matrix_sha256,
+            training_config_sha256=admission_request.training_config_sha256,
+            source_tree_sha256=self._config.source_tree_sha256,
+            train_manifest_sha256=train.manifest_sha256,
+            val_manifest_sha256=val.census_sha256,
+            device=self._config.device,
+            request_bf16=self._config.request_bf16,
+            bf16_runtime_qualified=self._config.bf16_runtime_qualified,
+            edge_budget=self._config.edge_budget,
+            checkpoint_every_updates=self._config.checkpoint_every_updates,
+        )
+        output_directory = qualification.output_root / qualification.session_id
+        try:
+            output_directory.mkdir(mode=0o700, parents=False, exist_ok=False)
+        except OSError as error:
+            raise HostConfigurationError(
+                "base qualification output directory cannot be created once"
+            ) from error
+        lease = _AttemptLease.acquire(output_directory)
+        try:
+            result = run_host_base_qualification(
+                request.terminal_root.resolve(),
+                config=qualification,
+                admission=cohort_admission,
+                validation_source=val,
+                output_directory=output_directory,
+                adapter_sha256=self._authenticated_adapter_sha256,
+            )
+            if result.execution.outcome == "COMPLETED":
+                authentication = result.authentication
+                if type(authentication) is not HostBaseQualificationAuthentication:
+                    raise HostConfigurationError(
+                        "completed qualification lost controller authentication"
+                    )
+                if getattr(adapter, "_base_qualification_authorization", None) is not None:
+                    raise HostConfigurationError(
+                        "production adapter already contains qualification authorization"
+                    )
+                self._qualification_authentication = authentication
+                self._qualification_intent = intent
+                # ProductionRuntimeAdapter intentionally validates this exact
+                # object after independently rebuilding the semantic artifact.
+                # The private host derives it here from actual controller output;
+                # no CLI/user digest is accepted as authorization.
+                object.__setattr__(
+                    adapter,
+                    "_base_qualification_authorization",
+                    authentication.authorization,
+                )
+            return result.execution
+        finally:
+            lease.release()
 
     def _execute_base_runtime(
         self,
@@ -2235,6 +2531,7 @@ class RuntimeAdapterFactory:
             config = HostConfig.load(self._config_path)
             receipts = config.load_receipts()
             config.validate_runtime()
+            config.validate_base_qualification_request(request)
             # Preflight verifies the authenticated prepared tree, materializes the
             # bounded capture source, and streams every concrete train batch once.
             config.load_sources()
@@ -2264,7 +2561,10 @@ class RuntimeAdapterFactory:
                 holds = ("HOLD_EXTERNAL_RECEIPTS_UNVERIFIED",)
             raise ExecutionHold(request.command, holds) from error
         backend = PhaseSetHostBackend(config, request)
-        return ProductionRuntimeAdapter(backend, receipts)
+        adapter = ProductionRuntimeAdapter(backend, receipts)
+        if request.command == "qualify-base":
+            backend.bind_qualification_adapter(adapter)
+        return adapter
 
 
 def main(argv: Sequence[str] | None = None, *, config_path: str | Path) -> int:
@@ -2295,6 +2595,7 @@ if __name__ == "__main__":
 __all__ = [
     "HostConfig",
     "HostConfigurationError",
+    "HOST_CONFIG_QUALIFICATION_SCHEMA",
     "PrivatePreparedDataSource",
     "RuntimeAdapterFactory",
     "entrypoint",

@@ -3,8 +3,9 @@
 `capture_pooling.py` and `capture_validation.py` implement the main task's
 numeric model-to-gallery path. `PhaseSetTrainingRuntime.fit(train_source,
 capture_validation_source)` uses it for validation checkpoint selection. The
-private-host on-disk capture source and the upstream licensed-data preparation
-remain separate integration work; this is not a declaration of data readiness.
+private host can load the on-disk capture source, but upstream licensed-data
+preparation and provenance remain separate work; this is not a declaration of
+data readiness.
 
 ## Complete capture inputs
 
@@ -37,7 +38,9 @@ to its actual consumed manifest/NPZ and canonical global ordinal. A source
 must contain either no such lineage or a complete, single-manifest sequence.
 It does not change capture pooling, text order or gallery semantics, and it
 does not by itself connect descriptor caching to this evaluator. The separate
-prepared-window cache plan cannot replace holistic capture validation.
+prepared-window cache plan cannot replace holistic capture validation. The
+[complete-capture descriptor plan](PERIODIC_CAPTURE_TRAINING_CACHE.md) provides
+that distinct typed connection.
 
 ## Encoding and pooling
 
@@ -61,6 +64,28 @@ edge budget admits every pair in every window. CUDA also checks a static
 model/gallery tensor estimate; this is not a total allocator/RSS guarantee.
 Resource failures reject the complete operation, never sample windows,
 captures, people, or edges. CUDA OOM remains an explicit resource failure.
+
+## Explicit cached descriptor path
+
+`run_capture_validation_cached` uses the same complete source, fixed-tree
+pooling, full gallery, objective and capture-macro metric implementation as the
+uncached runner. It accepts an admitted
+`PeriodicDescriptorCaptureTrainingPlan`, binds it to the residual system and
+complete training configuration, and asks the plan to rebuild and validate the
+whole capture source before any model forward or score.
+
+For each actual window in that rebuilt source, the plan reopens one verified
+`CachedPairChunkStream`; `ResidualRetrievalSystem.encode_trainable_cached`
+passes it explicitly to the registered periodic encoder. There is no silent
+cache-miss fallback and no cache of frozen-base or learned residual outputs.
+The attached frozen CLIP feature batch is validated and consumed exactly as in
+the uncached path; cached validation does not re-encode text. Prepared-window
+auxiliary validation is not accepted as a substitute for the holistic source.
+
+The original `run_capture_validation` API remains unchanged. Both entry points
+share the same core, and the cached wrapper/core are included in the scoped
+live-function identity checks. These checks detect in-process drift within the
+declared runtime; they are not arbitrary-Python isolation.
 
 ## Metrics and checkpoints
 
@@ -117,3 +142,15 @@ Embody captures, official holistic descriptions, a rights grant, complete host
 command composition, the nine-run base qualification, or sealed evaluation.
 See [host integration](HOST_RUNTIME_INTEGRATION.md) and
 [prepared window storage](PREPARED_DATA_V2.md).
+
+The complete capture descriptor plan and cached residual model entry later
+passed a 121-test focused server suite in 271.25 seconds with source unchanged;
+the complete combined regression passed 1305 tests, 2 existing skips and 39
+subtests in 613.86 seconds, also with source unchanged. Three official CLIP
+forwards retained the established outputs and caller RNG. Those suites
+enumerated the twenty-epoch software source census but did not train for twenty
+epochs or produce a checkpoint. The cached capture runner then passed 108
+focused server tests in 151.03 seconds with source unchanged. Its complete
+combined regression, including host qualification integration, passed 1334
+tests, 2 existing skips and 39 subtests in 643.90 seconds, source unchanged. Training,
+checkpoint/resume and host lifecycle integration for the plan remain pending.

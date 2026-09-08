@@ -5,9 +5,11 @@ formal-residual configuration, prepared-v2 train/val sources and authenticated
 `PeriodicDescriptorCacheV2` readers. It accepts no caller-authored plan digest,
 key subset or cache-miss fallback.
 
-This API is an engineering prepared-window seam. It does not implement the
+This API remains an engineering prepared-window seam. It does not implement the
 main task's holistic capture validation, start training, restore a checkpoint
-or establish data rights.
+or establish data rights. A separate
+[complete-capture plan](PERIODIC_CAPTURE_TRAINING_CACHE.md) now covers the
+holistic validation source without relabeling this auxiliary validation input.
 
 ## Complete requests, one seed at a time
 
@@ -53,6 +55,8 @@ exercise all three seeds, twenty epochs, family mapping, closed census,
 resource order, request mutants and repeated reader opens.
 
 No optimization, trained checkpoint, real-data cache, speedup, formal result or
-holistic validation is claimed by that observation. Complete-capture plans,
-the retrieval runtime's cached entry, initialization/report/checkpoint binding
-and resume remain distinct integration work.
+holistic validation is claimed by that observation. The complete-capture plan
+and explicit cached model entry are implemented as separate typed APIs. Their
+training-loop, initialization/report, checkpoint and resume integration remains
+unfinished; this prepared-window plan is not upgraded into main-task evidence
+by those later components.

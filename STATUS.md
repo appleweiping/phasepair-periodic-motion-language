@@ -13,6 +13,16 @@ evidence, not training results or scientific claims.
 
 ## Server continuation
 
+- The cached complete-capture evaluator and private host qualification
+  controller now pass one combined Linux server regression: 1334 tests,
+  2 existing skips and 39 subtests in 643.90 seconds, with source unchanged.
+  This closes software integration only. Native data access, all formal
+  training, actual cohort qualification and sealed scores remain absent.
+  Fresh static review identified pending early timer-capability admission,
+  exception-safe timer restoration and post-admission source/output/lease
+  failure classification corrections in the qualification controller. See
+  [known host runtime boundaries](docs/HOST_BASE_QUALIFICATION.md).
+
 - The combined capture-lineage, prepared-window cache-plan and CUDA-workspace
   correction passed 157 focused and 1285 full Linux server tests, two existing
   skips and 39 subtests, with source unchanged. A separate actual K=32 GPU
@@ -31,10 +41,32 @@ evidence, not training results or scientific claims.
   server tests, two existing skips and 39 subtests, source unchanged.
   A separate prepared-window periodic plan passed 76 combined tests, admitting
   the exact twenty-epoch source/cache census for each registered seed and
-  reopening each selected shard without fallback. It is not the main-task
-  capture cache or an integrated training/checkpoint/resume implementation.
+  reopening each selected shard without fallback. A separate complete-capture
+  plan now binds the holistic capture source and its cache without relabeling
+  prepared-window auxiliary validation. Neither plan is yet an integrated
+  training/checkpoint/resume implementation.
   See [capture storage](docs/CAPTURE_PREPARED_STORAGE.md) and
   [window cache plan](docs/PERIODIC_TRAINING_CACHE_PLAN.md).
+
+- The complete-capture plan enumerates the actual twenty-epoch prepared source
+  and every holistic validation window for one registered seed, requiring its
+  closed cache census before returning explicit sealed streams. The residual
+  runtime now has a separate cached encoding entry, and a cached holistic
+  evaluator shares the original complete pooling/gallery oracle while changing
+  only periodic descriptor acquisition. The original uncached APIs remain.
+  A focused server suite covering the cached residual model, frozen-text source
+  binding and complete-capture plan passed 121 tests in 271.25 seconds with
+  source unchanged. The complete combined regression then passed 1305 tests,
+  2 existing skips and 39 subtests in 613.86 seconds, again with source
+  unchanged. Three actual official CLIP forwards retained the established
+  outputs and caller RNG. The later cached holistic evaluator passed 108
+  focused server tests in 151.03 seconds with source unchanged; its subsequent
+  combined 1334-test regression is reported above. These were
+  software-source enumeration and text observations, not twenty epochs of
+  training. Training-loop, checkpoint/resume and host cache-plan consumption
+  remain unfinished. See
+  [complete-capture cache plan](docs/PERIODIC_CAPTURE_TRAINING_CACHE.md) and
+  [capture validation](docs/CAPTURE_VALIDATION.md).
 
 - Prepared-v2 batches now retain their exact descriptor source/window/epoch/yaw
   contexts. Repeated rotation of an already contextualized batch is rejected.
@@ -56,8 +88,9 @@ evidence, not training results or scientific claims.
   without an uncached fallback. The model/cache/control suite passed 98 Linux
   server tests; full regression passed 1228 tests, 2 existing skips and
   39 subtests in 401.07 s, source unchanged. These are software fixtures,
-  not real data or measured acceleration. Training-row selection, complete
-  epoch census and checkpoint/resume cache consumption remain unfinished.
+  not real data or measured acceleration. Plan admission now covers training
+  rows and the complete epoch census, but training-loop and checkpoint/resume
+  cache consumption remain unfinished.
   See [descriptor model integration](docs/PERIODIC_DESCRIPTOR_CACHE_V2.md).
   The host now retains the canonical admitted plan/matrix/config instead of
   reading fields absent from the actual command intent. Commands and handler
@@ -79,7 +112,7 @@ evidence, not training results or scientific claims.
   software fixtures, not a real nine-run cohort, formal CUDA latency session,
   winner or licensed-data cache. The later explicit cache-model API is reported
   above; training/resume cache consumption and host qualification command
-  assembly remain unfinished. See
+  execution with real cohort inputs remain unfinished. See
   [base qualification](docs/BASE_COHORT_QUALIFICATION.md),
   [progress journal](docs/LATENCY_PROGRESS_JOURNAL.md) and
   [descriptor cache](docs/PERIODIC_DESCRIPTOR_CACHE_V2.md).
@@ -109,11 +142,16 @@ evidence, not training results or scientific claims.
   A separate unmocked full-width B0/B1/B2 selected-state-to-gallery witness
   passed all three lanes in 19.36 s on analytic K2/K3, T200 captures. It uses
   explicit checkpoint-cursor and text fixtures, not completed formal epochs,
-  real captions or an actual nine-run cohort. At that earlier snapshot, latency and qualification assembly were
-  unfinished; their newer software verification is reported above. Actual
-  qualification execution and host command assembly remain unfinished. The merged source
-  then passed 1124 complete Linux server tests, 2 existing skips and 39 subtests
-  in 315.67 s with the source census unchanged. See
+  real captions or an actual nine-run cohort. The merged source at that stage
+  passed 1124 complete Linux server tests, 2 existing skips and 39 subtests in
+  315.67 s with the source census unchanged. Latency and qualification assembly
+  were unfinished at that snapshot; their newer software verification is
+  reported above. A private host qualification controller is now implemented,
+  and its corrected focused server suite passed 131 tests in 37.07 seconds
+  with source unchanged. The first attempt's seven fixture API failures and
+  123 passes remain retained; only the test file changed for the successful
+  retry. These software fixtures do not constitute actual qualification of a
+  trained cohort. See
   [completed-base capture scoring](docs/BASE_COHORT_VALIDATION.md).
 
 - Strict known-host SSH login to the registered host now succeeds. The initial
@@ -274,7 +312,11 @@ evidence, not training results or scientific claims.
   Fifty-one focused server tests passed, including actual tiny residual
   optimization/checkpoint/resume equality and zero execution on invalid prior
   checkpoint bytes. See [resume details](docs/RESIDUAL_RESUME.md).
-  The remaining preparation/qualification/evaluation host commands are not yet wired.
+  Preparation and sealed evaluation host commands remain unwired. The separate
+  base-qualification controller passed 131 focused server tests after a
+  test-only correction; the first attempt's seven fixture API failures and
+  123 passes remain retained. No actual nine-run completion is claimed; see
+  [host base qualification](docs/HOST_BASE_QUALIFICATION.md).
   Four actual tiny server fits verified observer behavior without changing
   checkpoint/model/loss/validation outputs. These are engineering fixtures,
   not formal training attempts. GitHub CI passed both Windows runtimes and the

@@ -59,7 +59,7 @@ from .models import (
     build_group_base,
 )
 from .objectives import PhaseSetRetrievalHead, variable_positive_symmetric_infonce
-from .periodic_descriptor_cache_v2 import DescriptorWindowContext
+from .periodic_descriptor_cache_v2 import CachedPairChunkStream, DescriptorWindowContext
 
 
 STATUS: Final = "DATA_FREE_EXECUTABLE_TRAINING_RUNTIME_NONPRODUCTION_AUTHORITY0"
@@ -613,13 +613,54 @@ class ResidualRetrievalSystem(nn.Module):
         self.frozen_base.eval()
         return self
 
-    def encode_trainable(self, groups: PreparedGroupBatch) -> tuple[Tensor, Tensor]:
-        output = self.periodic_encoder(groups)
+    def _validated_trainable_output(
+        self,
+        output: object,
+    ) -> tuple[Tensor, Tensor]:
+        """Apply the unchanged residual-token checks to either explicit path."""
+
         if type(output) is not GroupTokenOutput:
             raise TrainingRuntimeError("residual encoder must return exact GroupTokenOutput")
         if output.tokens.ndim != 3 or output.tokens.shape[-1] != self.embedding_dim:
             raise TrainingRuntimeError("residual token width differs from training system")
         return output.tokens.float().contiguous(), output.band_mask.contiguous()
+
+    def encode_trainable(self, groups: PreparedGroupBatch) -> tuple[Tensor, Tensor]:
+        return self._validated_trainable_output(self.periodic_encoder(groups))
+
+    def encode_trainable_cached(
+        self,
+        groups: PreparedGroupBatch,
+        descriptor_stream: CachedPairChunkStream,
+    ) -> tuple[Tensor, Tensor]:
+        """Encode only from one explicit verified descriptor stream.
+
+        The cache remains a substitute for the fixed periodic descriptors only.
+        Frozen-base outputs and learned residual outputs are never cached here.
+        """
+
+        from .controls import PhaseSetSystem, _ControlledPhaseSetEncoder
+
+        if self.system_id not in ("02", "03", "04", "06", "07", "08"):
+            raise TrainingRuntimeError(
+                "this registered residual system does not admit cached descriptors"
+            )
+        periodic = self.periodic_encoder
+        if (
+            type(periodic) is not PhaseSetSystem
+            or periodic.system_id != self.system_id
+            or type(periodic.encoder) is not _ControlledPhaseSetEncoder
+        ):
+            raise TrainingRuntimeError(
+                "cached residual encoding requires the exact registered PhaseSet encoder"
+            )
+        if type(descriptor_stream) is not CachedPairChunkStream:
+            raise TypeError("descriptor_stream must be exact CachedPairChunkStream")
+        output = periodic.forward_cached(
+            groups,
+            descriptor_stream=descriptor_stream,
+        )
+        return self._validated_trainable_output(output)
 
     def encode_frozen_base(self, groups: PreparedGroupBatch) -> Tensor:
         with torch.no_grad():
