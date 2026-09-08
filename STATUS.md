@@ -18,8 +18,10 @@ evidence, not training results or scientific claims.
 - A separate data-volume Python 3.12.12 / NumPy 2.4.6 / Torch 2.12.0+cu126
   environment is installed with a clean dependency check. The complete Linux
   CPU regression including the private-host lifecycle integration passed:
-  948 tests, 2 skipped, and 39 subtests, in 376.00 s after adding residual
-  host resume. Source bytes were unchanged before and after the full suite.
+  964 tests, 2 skipped, and 39 subtests, in 286.06 s after adding prepared-data
+  v2 host dispatch. Its focused integration passed 94 tests. Source bytes were
+  unchanged before and after both suites. The prior residual-resume integration
+  passed 948 tests and 39 subtests.
   The earlier frozen-CLIP integration passed 932 tests and 39 subtests.
   The earlier host-only suite passed 917 tests and its 25 focused checks.
   This includes synthetic model/lifecycle checks, not main-data training.
@@ -48,6 +50,14 @@ evidence, not training results or scientific claims.
 - The native Embody loader and concrete licensed SMPL-X body-22 evaluator are
   implemented. Seven adapter contract tests passed on Linux/Python 3.12.12/
   NumPy 2.4.6; these use explicit fixtures, not licensed assets or main data.
+- The immutable prepared-data v2 writer/reader now connects canonical body-22
+  windows and frozen variable-count text features to the private-host factory.
+  It verifies the exact consumed index/manifest/payload bytes, rejects split
+  overlap, and applies reproducible shared-group yaw from original bytes each
+  training epoch. Validation is unrotated. Window-positive families support the
+  auxiliary task; the main holistic capture validation route is not yet wired.
+  Actor-set commitments must not be used as unique capture/window row IDs.
+  See [prepared-data contract](docs/PREPARED_DATA_V2.md).
 - Neither Embody approval nor a licensed neutral model has been observed.
   Open-license Multi-TPC acquisition completed with its official byte count and
   MD5 verified. Its archive inventory has 322 files. The bounded audit confirms

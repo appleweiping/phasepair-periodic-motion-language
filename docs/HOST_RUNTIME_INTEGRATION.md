@@ -20,7 +20,14 @@ It never creates authority, rights, runtime, or execution receipts.  If an
 artifact is absent or changed, the factory raises the existing
 `ExecutionHold` codes and the public CLI remains authority zero.
 
-`PrivatePreparedDataSource` maps one immutable split manifest to the public
+The factory dispatches v1 and v2 prepared indexes using the actual index bytes
+bound to the private prepared-data receipt. The v2 loader also verifies each
+consumed split manifest before decoding its numeric batches. Malformed batch
+semantics are translated into the existing execution hold before a training
+backend is constructed. The legacy v1 loader now checks its consumed manifest
+against the index digest rather than relying on a separate earlier path read.
+
+`PrivatePreparedDataSource` maps a v1 immutable split manifest to the public
 `TrainingDataSource` protocol.  Each NPZ contains exactly:
 
 - `skeletons`: float32 `[B,K,200,22,3]`
@@ -33,6 +40,12 @@ artifact is absent or changed, the factory raises the existing
 - `motion_positive_ids`: uint8 `[B,32]`
 - `text_positive_ids`: uint8 `[Q,32]`
 - `text_commitments`: uint8 `[Q,32]`
+
+The v2 contract fixes the text width at 512, accepts variable caption counts,
+and supplies epoch-specific deterministic whole-group yaw from immutable
+unrotated training bytes. Its validation source is unrotated. See
+[prepared-data v2](PREPARED_DATA_V2.md) for the writer, bounded numeric format,
+split checks, and provenance limits. Neither loader establishes data rights.
 
 `run-base` uses the formal seed-bound B0--B2 constructor and
 `PhaseSetTrainingRuntime`.  Its checkpoint directory must be
@@ -143,6 +156,12 @@ rights assertion when Embody approval is unknown.
 - The Embody-format conversion is outside this harness.  It must produce the
   exact prepared index/split/NPZ seam above and bind it to the authenticated
   prepared-data receipt.
+- The current training validation path is still window-oriented. V2 positive
+  families identify windows; actor-set group commitments are lineage and can
+  repeat across windows or captures. Neither is a substitute for the main
+  holistic capture gallery. Complete capture-window census, fixed embedding
+  aggregation, and capture-level scoring must be connected before formal base
+  selection on that task.
 - `run-residual` is wired through the strict qualified-base loader, canonical
   periodic-cache record, energy floors, canonical all-system capacity audit,
   closed residual constructor, and the same attempt ledger. Residual resume
@@ -187,3 +206,8 @@ Report/failure JSON is file-fsynced and, on POSIX, parent-directory-fsynced
 before a terminal is persisted. A failed fsync cannot create a success terminal.
 Actual Embody rights, full model/runtime qualification, all registered runs,
 and sealed test remain separate requirements.
+
+The subsequent v2 prepared-source integration passed 94 focused server tests
+and a separate complete suite of 964 tests, 2 skipped, and 39 subtests. These
+include actual malformed numeric payloads and manifest/index replacement
+cases; they do not assert a completed preparation command or a real-data run.

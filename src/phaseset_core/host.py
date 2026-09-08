@@ -62,12 +62,19 @@ from phaseset_core.production import (
     PrivateReceiptAssertions,
     ProductionRuntimeAdapter,
 )
+from phaseset_core.prepared_data_v2 import (
+    PREPARED_INDEX_V2_SCHEMA,
+    PreparedDataV2Error,
+    load_prepared_training_sources_v2,
+)
 from phaseset_core.training import (
     CheckpointArtifact,
     PhaseSetTrainingRuntime,
     ResidualCapacityAudit,
     RetrievalTrainingBatch,
     TrainingConfig,
+    TrainingDataSource,
+    TrainingRuntimeError,
     TrainingReport,
     construct_registered_base_seed_bound_system,
     construct_registered_residual_seed_bound_system,
@@ -818,16 +825,28 @@ class HostConfig:
 
     def load_sources(
         self,
-    ) -> tuple[PrivatePreparedDataSource, PrivatePreparedDataSource]:
+    ) -> tuple[TrainingDataSource, TrainingDataSource]:
         raw, value = _load_json_object(self.prepared_index, "prepared index")
         _closed_keys(value, {"schema", "train", "val"}, "prepared index")
-        if value["schema"] != PREPARED_INDEX_SCHEMA:
+        schema = value["schema"]
+        if schema not in {PREPARED_INDEX_SCHEMA, PREPARED_INDEX_V2_SCHEMA}:
             raise HostConfigurationError("prepared index schema is not registered")
         receipts = self.load_receipts()
         if _sha256_bytes(raw) != receipts.prepared_data_manifest_sha256:
             raise HostConfigurationError(
                 "prepared index differs from authenticated receipt"
             )
+        if schema == PREPARED_INDEX_V2_SCHEMA:
+            try:
+                return load_prepared_training_sources_v2(
+                    self.prepared_index,
+                    expected_index_sha256=receipts.prepared_data_manifest_sha256,
+                    max_batch_bytes=self.max_batch_bytes,
+                )
+            except (PreparedDataV2Error, TrainingRuntimeError) as error:
+                raise HostConfigurationError(
+                    "prepared v2 source is invalid"
+                ) from error
         sources: list[PrivatePreparedDataSource] = []
         for split in ("train", "val"):
             item = value[split]
@@ -839,11 +858,11 @@ class HostConfig:
             path = _resolve_under(
                 self.prepared_index.parent, item["path"], f"{split} manifest"
             )
-            if _sha256_file(path) != item["sha256"]:
-                raise HostConfigurationError(f"{split} manifest digest mismatch")
             source = PrivatePreparedDataSource(
                 path, max_batch_bytes=self.max_batch_bytes
             )
+            if source.manifest_sha256 != item["sha256"]:
+                raise HostConfigurationError(f"{split} manifest digest mismatch")
             if source.split != split:
                 raise HostConfigurationError(
                     f"{split} manifest declares the wrong split"
