@@ -18,8 +18,9 @@ evidence, not training results or scientific claims.
 - A separate data-volume Python 3.12.12 / NumPy 2.4.6 / Torch 2.12.0+cu126
   environment is installed with a clean dependency check. The complete Linux
   CPU regression including the private-host lifecycle integration passed:
-  917 tests, 1 skipped, and 39 subtests, in 345.97 s. Source bytes were unchanged
-  before and after the full suite. Its separate 25 focused tests also passed.
+  932 tests, 1 skipped, and 39 subtests, in 287.60 s after adding the frozen
+  CLIP adapter. Source bytes were unchanged before and after the full suite.
+  The earlier host-only suite passed 917 tests and its 25 focused checks.
   This includes synthetic model/lifecycle checks, not main-data training.
 - A separately bounded shared-GPU functionality probe passed FP64 forward and
   FP32 forward/backward using 8x8 tensors. It did not stop existing workloads
@@ -47,7 +48,12 @@ evidence, not training results or scientific claims.
   confirmatory data. The pinned CLIP snapshot's eight files also match the
   previously acquired official SHA-256 values. Actual frozen CLIP text CPU
   loading and two public-caption forwards passed, with bitwise repeat outputs
-  and unchanged RNG. This does not qualify GPU execution or real data training.
+  and unchanged RNG. The production-shaped frozen text adapter subsequently
+  passed 15 server tests and three real-model forwards: the unchanged repeat
+  golden plus a separate 226-to-77-token long-caption observation. It verifies
+  the exact retained prefix and EOS, restores caller RNG, and emits text-free
+  receipts. See [frozen CLIP text adapter](docs/FROZEN_CLIP_TEXT_ADAPTER.md).
+  This does not qualify GPU text execution or real-data training.
 - Native Linux last-bit Morlet formula drift is repaired using strictly
   verified canonical coefficient bytes, while preserving both original hashes.
   Windows still requires its original exact formula digest; Linux requires its
