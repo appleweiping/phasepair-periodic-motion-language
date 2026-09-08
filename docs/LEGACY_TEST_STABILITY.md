@@ -26,3 +26,20 @@ in 297.31 seconds; source bytes were unchanged across execution.
 These are test-fixture changes, not relaxed model tolerances or weaker data
 admission checks. Review was local-only under ARIS's unavailable-delegation
 fallback; actual server outcomes remain the deterministic evidence.
+
+## Canonical capture-index fixture newlines
+
+The later complete-capture host integration passed its Linux tests but exposed
+18 failures on each Windows CI runtime. Its test-only JSON writer used the
+platform default newline translation: canonical text ending in LF became CRLF
+on Windows. The production byte-equality check correctly rejected the fixture
+before the intended dispatch or overlap assertion. This is distinct from the
+earlier storage-stat issue, whose tests passed in that same CI run.
+
+The fixture now supplies an explicit LF newline policy. Production code and
+canonical-byte acceptance are unchanged. Two additional authenticated cases
+insert actual CRLF at the outer and referenced training-index seams; both must
+still be rejected even with recomputed matching digests. The corrected focused
+Linux server suite passed 71 tests in 11.08 seconds with source bytes unchanged.
+The failed Windows logs are retained privately. Acceptance on Windows requires
+the subsequent actual CI result, not inference from this Linux observation.

@@ -41,6 +41,7 @@ def _write_json(path: Path, value: object) -> None:
         )
         + "\n",
         encoding="ascii",
+        newline="\n",
     )
 
 
@@ -252,6 +253,9 @@ def _rewrite_index(path: Path, mutate) -> str:
 
 
 def _make_noncanonical_json(raw: bytes, variant: str) -> bytes:
+    if variant == "crlf":
+        assert raw.endswith(b"\n") and not raw.endswith(b"\r\n")
+        return raw[:-1] + b"\r\n"
     if variant == "whitespace":
         assert raw.startswith(b"{")
         return b"{ " + raw[1:]
@@ -283,7 +287,7 @@ def test_capture_index_returns_training_protocol_and_exact_capture_val(
     assert not hasattr(val, "iter_epoch")
 
 
-@pytest.mark.parametrize("variant", ("whitespace", "duplicate", "nonascii"))
+@pytest.mark.parametrize("variant", ("whitespace", "duplicate", "nonascii", "crlf"))
 def test_capture_index_requires_exact_canonical_bytes_after_authentication(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -303,7 +307,7 @@ def test_capture_index_requires_exact_canonical_bytes_after_authentication(
         _config(index).load_sources()
 
 
-@pytest.mark.parametrize("variant", ("whitespace", "duplicate", "nonascii"))
+@pytest.mark.parametrize("variant", ("whitespace", "duplicate", "nonascii", "crlf"))
 def test_capture_index_requires_canonical_referenced_training_index(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
