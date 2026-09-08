@@ -20,6 +20,7 @@ from pathlib import Path
 import re
 import signal
 import stat
+import threading
 from typing import Final, Iterator
 
 from . import base_cohort_latency as latency_module
@@ -64,6 +65,10 @@ class _ScoringCudaHold(RuntimeError):
     def __init__(self, failure_code: str, message: str) -> None:
         super().__init__(message)
         self.failure_code = failure_code
+
+
+class _FormalLatencyTimerHold(RuntimeError):
+    """The required process-local latency timer is unavailable or drifted."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -379,39 +384,113 @@ def load_base_attempt_registry(
     return checked, raw, digest
 
 
+def _validate_formal_latency_timer_support(
+    *,
+    _os_name: str | None = None,
+    _signal_api: object | None = None,
+    _threading_api: object | None = None,
+) -> None:
+    """Check the real process timer boundary without mutating timer state."""
+
+    os_name = os.name if _os_name is None else _os_name
+    signal_api = signal if _signal_api is None else _signal_api
+    threading_api = threading if _threading_api is None else _threading_api
+    if os_name != "posix" or not all(
+        hasattr(signal_api, name)
+        for name in (
+            "SIGALRM",
+            "ITIMER_REAL",
+            "getitimer",
+            "getsignal",
+            "setitimer",
+            "signal",
+        )
+    ):
+        raise _FormalLatencyTimerHold(
+            "formal latency timeout requires POSIX interval timers"
+        )
+    if not all(
+        callable(getattr(threading_api, name, None))
+        for name in ("current_thread", "main_thread")
+    ):
+        raise _FormalLatencyTimerHold("formal latency timer thread API is unavailable")
+    try:
+        if threading_api.current_thread() is not threading_api.main_thread():
+            raise _FormalLatencyTimerHold(
+                "formal latency timeout requires the Python main thread"
+            )
+        prior_timer = signal_api.getitimer(signal_api.ITIMER_REAL)
+        signal_api.getsignal(signal_api.SIGALRM)
+    except _FormalLatencyTimerHold:
+        raise
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as error:
+        raise _FormalLatencyTimerHold(
+            "formal latency timer capability check failed"
+        ) from error
+    if prior_timer != (0.0, 0.0):
+        raise _FormalLatencyTimerHold(
+            "formal latency refuses an inherited process timer"
+        )
+
+
 @contextmanager
 def _formal_latency_timeout(
     seconds: int,
     *,
     _os_name: str | None = None,
     _signal_api: object | None = None,
+    _threading_api: object | None = None,
 ) -> Iterator[None]:
     """Install the process-local formal timeout; the outer hard-kill is separate."""
 
-    os_name = os.name if _os_name is None else _os_name
     signal_api = signal if _signal_api is None else _signal_api
-    if os_name != "posix" or not all(
-        hasattr(signal_api, name)
-        for name in ("SIGALRM", "ITIMER_REAL", "setitimer", "getitimer")
-    ):
-        raise HostBaseQualificationError("formal latency timeout requires POSIX interval timers")
     if type(seconds) is not int or not 1 <= seconds <= MAX_WALL_TIMEOUT_SECONDS:
         raise HostBaseQualificationError("formal latency timeout is outside its bound")
-    prior_timer = signal_api.getitimer(signal_api.ITIMER_REAL)
-    if prior_timer != (0.0, 0.0):
-        raise HostBaseQualificationError("formal latency refuses an inherited process timer")
-    prior_handler = signal_api.getsignal(signal_api.SIGALRM)
+    _validate_formal_latency_timer_support(
+        _os_name=_os_name,
+        _signal_api=signal_api,
+        _threading_api=_threading_api,
+    )
+    try:
+        prior_handler = signal_api.getsignal(signal_api.SIGALRM)
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as error:
+        raise _FormalLatencyTimerHold(
+            "formal latency timer handler could not be read"
+        ) from error
 
     def timeout_handler(_signum: int, _frame: object) -> None:
         raise TimeoutError("formal base latency wall timeout expired")
 
-    signal_api.signal(signal_api.SIGALRM, timeout_handler)
-    signal_api.setitimer(signal_api.ITIMER_REAL, float(seconds), 0.0)
+    primary_error: BaseException | None = None
     try:
+        try:
+            signal_api.signal(signal_api.SIGALRM, timeout_handler)
+            signal_api.setitimer(signal_api.ITIMER_REAL, float(seconds), 0.0)
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as error:
+            raise _FormalLatencyTimerHold(
+                "formal latency timer could not be installed"
+            ) from error
         yield
+    except BaseException as error:
+        primary_error = error
+        raise
     finally:
-        signal_api.setitimer(signal_api.ITIMER_REAL, 0.0, 0.0)
-        signal_api.signal(signal_api.SIGALRM, prior_handler)
+        cleanup_error: BaseException | None = None
+        try:
+            signal_api.setitimer(signal_api.ITIMER_REAL, 0.0, 0.0)
+        except BaseException as error:
+            cleanup_error = error
+        try:
+            signal_api.signal(signal_api.SIGALRM, prior_handler)
+        except BaseException as error:
+            if cleanup_error is None:
+                cleanup_error = error
+        if primary_error is None and cleanup_error is not None:
+            if isinstance(cleanup_error, Exception):
+                raise _FormalLatencyTimerHold(
+                    "formal latency timer could not be restored"
+                ) from cleanup_error
+            raise cleanup_error
 
 
 def _journal_terminal_payload(
@@ -607,6 +686,8 @@ def _failure_code(error: BaseException, stage: str) -> tuple[str, str]:
         return "HELD", f"BASE_SCORING_CUDA_{error.failure_code}"
     if isinstance(error, latency_module.BaseCohortLatencyHold):
         return "HELD", f"LATENCY_{error.failure_code}"
+    if isinstance(error, _FormalLatencyTimerHold):
+        return "HELD", "LATENCY_RUNTIME_DRIFT"
     if isinstance(error, (TimeoutError, journal_module.LatencyJournalWriteError)):
         return "HELD", "LATENCY_OBSERVATION_INCOMPLETE"
     if isinstance(error, resolver_module.BaseCohortResolutionError):
@@ -714,7 +795,7 @@ def run_host_base_qualification(
             "qualification output directory differs from its frozen session path"
         )
     formal = _test_runtime is None
-    stage = "REGISTRY"
+    stage = "LATENCY_PREFLIGHT" if formal else "REGISTRY"
     registry_digest = config.registry_sha256
     journal_path: Path | None = None
     journal_sha256: str | None = None
@@ -723,6 +804,9 @@ def run_host_base_qualification(
     secondary_cleanup_error_type: str | None = None
     start_path: Path | None = None
     try:
+        if formal:
+            _validate_formal_latency_timer_support()
+            stage = "REGISTRY"
         registry_rows, registry_raw, registry_digest = load_base_attempt_registry(
             config.registry_path,
             expected_sha256=config.registry_sha256,

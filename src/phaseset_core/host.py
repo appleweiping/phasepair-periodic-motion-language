@@ -168,6 +168,22 @@ def _qualify_base_request_is_closed(request: cli.CLICommandRequest) -> bool:
     )
 
 
+def _qualify_base_runtime_hold(*, prepared_data: bool) -> ExecutionHold:
+    """Map only post-admission qualify-base runtime drift to the public HOLD seam."""
+
+    if type(prepared_data) is not bool:
+        raise TypeError("prepared_data must be exact bool")
+    holds = (
+        (
+            "HOLD_PREPARED_DATA_MANIFEST_ABSENT",
+            "HOLD_EXTERNAL_RECEIPTS_UNVERIFIED",
+        )
+        if prepared_data
+        else ("HOLD_EXTERNAL_RECEIPTS_UNVERIFIED",)
+    )
+    return ExecutionHold("qualify-base", holds)
+
+
 class _AttemptLease:
     """Process-released exclusive lease held for one attempt's full lifetime."""
 
@@ -1907,32 +1923,44 @@ class PhaseSetHostBackend:
             )
         if request.terminal_root is None:  # narrowed by the closed-input predicate
             raise AssertionError("closed qualify-base request lost terminal_root")
-        train, val = self._config.load_sources()
-        if type(val) is not CaptureValidationSource or val.split != "val":
-            raise HostConfigurationError(
-                "qualify-base requires the complete holistic capture val source"
+        try:
+            train, val = self._config.load_sources()
+            if type(val) is not CaptureValidationSource or val.split != "val":
+                raise HostConfigurationError(
+                    "qualify-base requires the complete holistic capture val source"
+                )
+            cohort_admission = BaseCohortAdmission(
+                plan_sha256=admission_request.plan_sha256,
+                matrix_sha256=admission_request.matrix_sha256,
+                training_config_sha256=admission_request.training_config_sha256,
+                source_tree_sha256=self._config.source_tree_sha256,
+                train_manifest_sha256=train.manifest_sha256,
+                val_manifest_sha256=val.census_sha256,
+                device=self._config.device,
+                request_bf16=self._config.request_bf16,
+                bf16_runtime_qualified=self._config.bf16_runtime_qualified,
+                edge_budget=self._config.edge_budget,
+                checkpoint_every_updates=self._config.checkpoint_every_updates,
             )
-        cohort_admission = BaseCohortAdmission(
-            plan_sha256=admission_request.plan_sha256,
-            matrix_sha256=admission_request.matrix_sha256,
-            training_config_sha256=admission_request.training_config_sha256,
-            source_tree_sha256=self._config.source_tree_sha256,
-            train_manifest_sha256=train.manifest_sha256,
-            val_manifest_sha256=val.census_sha256,
-            device=self._config.device,
-            request_bf16=self._config.request_bf16,
-            bf16_runtime_qualified=self._config.bf16_runtime_qualified,
-            edge_budget=self._config.edge_budget,
-            checkpoint_every_updates=self._config.checkpoint_every_updates,
-        )
+        except (
+            AttributeError,
+            HostConfigurationError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as error:
+            raise _qualify_base_runtime_hold(prepared_data=True) from error
         output_directory = qualification.output_root / qualification.session_id
         try:
             output_directory.mkdir(mode=0o700, parents=False, exist_ok=False)
         except OSError as error:
-            raise HostConfigurationError(
-                "base qualification output directory cannot be created once"
-            ) from error
-        lease = _AttemptLease.acquire(output_directory)
+            raise _qualify_base_runtime_hold(prepared_data=False) from error
+        try:
+            lease = _AttemptLease.acquire(output_directory)
+        except (HostConfigurationError, OSError, RuntimeError) as error:
+            raise _qualify_base_runtime_hold(prepared_data=False) from error
+        primary_error: BaseException | None = None
         try:
             result = run_host_base_qualification(
                 request.terminal_root.resolve(),
@@ -1964,8 +1992,15 @@ class PhaseSetHostBackend:
                     authentication.authorization,
                 )
             return result.execution
+        except BaseException as error:
+            primary_error = error
+            raise
         finally:
-            lease.release()
+            try:
+                lease.release()
+            except Exception as error:
+                if primary_error is None:
+                    raise _qualify_base_runtime_hold(prepared_data=False) from error
 
     def _execute_base_runtime(
         self,

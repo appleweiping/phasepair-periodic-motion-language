@@ -235,8 +235,9 @@ rights assertion when Embody approval is unknown.
   and registered final system IDs; the host implements base and residual resume
   and recovers identity from the verified attempt ledger.
 - The residual encoder and complete-capture evaluator now expose explicit
-  reader-backed descriptor-cache APIs. The training loop and this host's
-  residual construction/checkpoint/resume path do not yet consume those APIs.
+  reader-backed descriptor-cache APIs. The training loop now consumes explicit
+  admitted plans, including cached checkpoint/resume. This host's residual
+  construction/checkpoint/resume path does not yet inject those plans.
   The existing host cache argument authenticates the complete cache payload
   and consumes its energy floors, while its model path still recomputes
   descriptors. That historical behavior must not be represented as descriptor
@@ -313,3 +314,16 @@ backend path, validate typed holds and independently recheck completion
 artifacts. A preceding run with seven fixture/API failures is retained; only
 the tests changed for this rerun, not production code. These are software
 fixtures, not nine trained bases, formal CUDA latency rows or a selected base.
+
+The subsequent controller boundary correction passed 145 focused tests and was
+included in a 270-test combined cached-training/cache-construction cohort.
+Both observed runs kept the source unchanged. Early main-thread/POSIX timer
+checks, cleanup preservation and qualify-base-only runtime HOLD classification
+are implemented; Windows CI acceptance is a separate observation.
+
+The [descriptor cache builder](PERIODIC_CACHE_EXECUTION.md) and
+[cached residual lifecycle](CACHED_RESIDUAL_TRAINING.md) are callable core
+interfaces, not yet an end-to-end cached CLI host. Typed build evidence,
+private configuration, direct plan injection and ledger/resume linkage remain
+explicit follow-up integration. The existing uncached host does not silently
+select a cache based on files found on disk.

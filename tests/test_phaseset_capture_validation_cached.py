@@ -151,7 +151,11 @@ def test_complete_source_drift_and_missing_shard_fail_without_scores_or_fallback
     assert calls == {"cached": 0, "uncached": 0, "scores": 0}
 
     first_key = plan.capture_rows[0].cache_key_sha256
-    (bundle.capture_cache.root / "shards" / f"{first_key}.pdc2").unlink()
+    shard = bundle.capture_cache.root / "shards" / f"{first_key}.pdc2"
+    # The fixture deliberately removes an immutable shard; Windows requires
+    # clearing its read-only attribute before the missing-file fault injection.
+    shard.chmod(0o600)
+    shard.unlink()
     with pytest.raises(DescriptorCacheV2Error):
         capture_validation.run_capture_validation_cached(
             system,

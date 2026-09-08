@@ -54,8 +54,12 @@ separately. A successful score cannot enter latency unless cleanup reaches the
 exact-zero boundary.
 
 The in-process interval timer is supported only where the required POSIX timer
-API exists. It refuses an inherited deadline. Normal exit restores the prior
-handler; exception-safe restoration is pending as detailed below.
+API exists. The current controller checks that API, the Python main thread
+and the absence of an inherited deadline before registry resolution or scoring,
+then rechecks immediately before latency timer installation. Its cleanup always
+attempts both disarm and prior-handler restoration, and a cleanup error cannot
+replace the primary scoring or latency error. Timer capability or restoration
+drift is a runtime HOLD, not a scientific failure.
 Deployment must also provide its separately frozen hard timeout because a
 process signal cannot guarantee that a blocked native call returns. A hard kill
 may leave only a valid prefix of the progress journal and the start record;
@@ -82,14 +86,20 @@ passed 1334 tests, 2 existing skips and 39 subtests in 643.90 seconds on the
 Linux server, with source unchanged. No formal cohort was produced by this
 regression.
 
-Static review of this engineering milestone identified two remaining runtime
-boundary corrections: check POSIX/main-thread timer capability before scoring,
-and preserve timer-handler restoration if timer setup or cleanup fails;
-classify post-admission source/output/lease failures at the qualification host
-boundary as runtime outcomes rather than CLI input errors. These corrections
-and their fault-injection tests are not included in the observed 1334-test
-source. Formal qualification remains unexecuted; this feature-branch milestone
-is not an empirical release.
+Follow-up code now implements the two reviewed runtime-boundary
+corrections: the early and exception-safe timer behavior described above, and
+qualify-base-only classification of post-admission source/output/lease runtime
+failures as HOLD outcomes rather than CLI input errors. Other commands and the
+v1 private-host schema retain their prior behavior. Fault-injection tests use a
+typed portable timer facade so Windows does not need to emulate POSIX signals;
+a separate test exercises the real POSIX handler and timer restoration.
+
+The successor passed static checks, fresh static review, and 145 focused Linux
+server tests in 64.24 seconds with source unchanged. Those code and test changes
+are not included in the observed 1334-test source, and cross-platform CI
+acceptance remains pending, so this paragraph does not claim the portability
+defect is empirically closed. Formal qualification remains unexecuted; this
+feature-branch milestone is not an empirical release.
 
 The earlier K=32 B0/B1/B2 diagnostic verified the corrected per-process CUDA
 release mechanics at registered width, but used untrained models, one warmup

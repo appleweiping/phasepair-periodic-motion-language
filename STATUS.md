@@ -13,15 +13,31 @@ evidence, not training results or scientific claims.
 
 ## Server continuation
 
+- Complete two-store descriptor-cache construction and cached residual
+  checkpoint/resume now pass one combined 270-test Linux server cohort in
+  429.82 seconds, with source unchanged. It also includes the qualification
+  timer/runtime corrections and Windows readonly-shard fault-fixture fix.
+  The actual official CLIP outputs retain their two exact embedding goldens
+  and unchanged RNG under the new training-source binding. The same source
+  subsequently passed 1360 full Linux tests, 2 existing skips and 39 subtests
+  in 743.26 seconds, with source unchanged. Cross-platform CI acceptance is
+  tracked separately; no formal run is
+  implied. See [cache construction](docs/PERIODIC_CACHE_EXECUTION.md) and
+  [cached training/resume](docs/CACHED_RESIDUAL_TRAINING.md).
+
 - The cached complete-capture evaluator and private host qualification
   controller now pass one combined Linux server regression: 1334 tests,
   2 existing skips and 39 subtests in 643.90 seconds, with source unchanged.
   This closes software integration only. Native data access, all formal
   training, actual cohort qualification and sealed scores remain absent.
-  Fresh static review identified pending early timer-capability admission,
-  exception-safe timer restoration and post-admission source/output/lease
-  failure classification corrections in the qualification controller. See
-  [known host runtime boundaries](docs/HOST_BASE_QUALIFICATION.md).
+  The current successor now implements early POSIX/main-thread timer
+  admission, exception-safe timer restoration, and qualify-base-only runtime
+  classification for post-admission source/output/lease failures. Static review
+  passed, and its focused Linux server run passed 145 tests in 64.24 seconds
+  with source unchanged. That successor is not part of the observed 1334-test
+  source; it is included in the newer 1360-test cohort above. Windows CI
+  acceptance remains separate. See
+  [host runtime boundaries](docs/HOST_BASE_QUALIFICATION.md).
 
 - The combined capture-lineage, prepared-window cache-plan and CUDA-workspace
   correction passed 157 focused and 1285 full Linux server tests, two existing
@@ -43,8 +59,9 @@ evidence, not training results or scientific claims.
   the exact twenty-epoch source/cache census for each registered seed and
   reopening each selected shard without fallback. A separate complete-capture
   plan now binds the holistic capture source and its cache without relabeling
-  prepared-window auxiliary validation. Neither plan is yet an integrated
-  training/checkpoint/resume implementation.
+  prepared-window auxiliary validation. At that predecessor milestone the plans
+  were not yet integrated into training/checkpoint/resume; the current explicit
+  cached lifecycle is described above.
   See [capture storage](docs/CAPTURE_PREPARED_STORAGE.md) and
   [window cache plan](docs/PERIODIC_TRAINING_CACHE_PLAN.md).
 
@@ -63,8 +80,9 @@ evidence, not training results or scientific claims.
   focused server tests in 151.03 seconds with source unchanged; its subsequent
   combined 1334-test regression is reported above. These were
   software-source enumeration and text observations, not twenty epochs of
-  training. Training-loop, checkpoint/resume and host cache-plan consumption
-  remain unfinished. See
+  training. At that predecessor milestone, training-loop, checkpoint/resume
+  and host cache-plan consumption were unfinished. The newer core cached
+  lifecycle is reported above; host end-to-end injection remains separate. See
   [complete-capture cache plan](docs/PERIODIC_CAPTURE_TRAINING_CACHE.md) and
   [capture validation](docs/CAPTURE_VALIDATION.md).
 
@@ -76,7 +94,8 @@ evidence, not training results or scientific claims.
   the observed representation without bypassing device or resource checks.
   The combined Linux server suite passed 136 focused tests and 1257 full
   tests, 2 existing skips and 39 subtests in 413.42 s, source unchanged.
-  Complete training cache-plan/checkpoint/resume integration is still pending;
+  Complete training cache-plan/checkpoint/resume integration was still pending
+  at that predecessor milestone;
   these observations are not real-data training or a K32 performance result.
   See [source lineage](docs/PREPARED_DATA_V2.md) and
   [CUDA identity](docs/BASE_COHORT_QUALIFICATION.md).
@@ -88,9 +107,9 @@ evidence, not training results or scientific claims.
   without an uncached fallback. The model/cache/control suite passed 98 Linux
   server tests; full regression passed 1228 tests, 2 existing skips and
   39 subtests in 401.07 s, source unchanged. These are software fixtures,
-  not real data or measured acceleration. Plan admission now covers training
-  rows and the complete epoch census, but training-loop and checkpoint/resume
-  cache consumption remain unfinished.
+  not real data or measured acceleration. At that predecessor milestone plan
+  admission covered training rows and the complete epoch census, while the
+  training-loop/checkpoint/resume consumption reported above was unfinished.
   See [descriptor model integration](docs/PERIODIC_DESCRIPTOR_CACHE_V2.md).
   The host now retains the canonical admitted plan/matrix/config instead of
   reading fields absent from the actual command intent. Commands and handler
@@ -111,8 +130,8 @@ evidence, not training results or scientific claims.
   hardlink/oversize case split. These are explicit
   software fixtures, not a real nine-run cohort, formal CUDA latency session,
   winner or licensed-data cache. The later explicit cache-model API is reported
-  above; training/resume cache consumption and host qualification command
-  execution with real cohort inputs remain unfinished. See
+  above. Current host end-to-end cached training/resume and host qualification
+  command execution with real cohort inputs remain unfinished. See
   [base qualification](docs/BASE_COHORT_QUALIFICATION.md),
   [progress journal](docs/LATENCY_PROGRESS_JOURNAL.md) and
   [descriptor cache](docs/PERIODIC_DESCRIPTOR_CACHE_V2.md).
