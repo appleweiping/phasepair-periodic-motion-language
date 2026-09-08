@@ -26,7 +26,7 @@ import random
 import struct
 import sys
 import types
-from typing import Final, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Final, Literal, Protocol, runtime_checkable
 import uuid
 
 import numpy as np
@@ -35,6 +35,9 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 
 from phaseset_core import execution as execution_module
+
+if TYPE_CHECKING:
+    from .capture_validation import CaptureValidationSource
 
 from .contracts import PreparedGroupBatch, validate_prepared_group_batch
 from .execution import (
@@ -669,6 +672,9 @@ def _assert_registered_method_integrity(
 ) -> None:
     """Reject class monkeypatching and instance-level method shadowing."""
 
+    from .capture_validation import _verified_capture_validation_bindings
+
+    _verified_capture_validation_bindings()
     for name, expected in _FORMAL_RUNTIME_CONSTANTS.items():
         if globals().get(name) != expected or type(globals().get(name)) is not type(
             expected
@@ -1297,7 +1303,22 @@ class _CacheRow:
     rng_before: dict[str, object]
 
 
-def _source_identity(source: object, split: Split) -> tuple[TrainingDataSource, str]:
+def _source_identity(
+    source: object, split: Split,
+) -> tuple[TrainingDataSource | CaptureValidationSource, str]:
+    # Lazy import avoids the capture evaluator's intentional system-interface
+    # dependency on this module. Only the concrete val-only source is admitted.
+    from .capture_validation import _verified_capture_validation_bindings
+
+    CaptureValidationSource, _ = _verified_capture_validation_bindings()
+
+    if type(source) is CaptureValidationSource:
+        if split != "val":
+            raise TrainingRuntimeError("capture validation cannot be a training source")
+        checked = CaptureValidationSource(source.split, source.manifest_sha256, source.captures)
+        # The census binds the complete window/feature/text plan AND upstream
+        # manifest, so resume cannot substitute a different capture gallery.
+        return checked, checked.census_sha256
     if not isinstance(source, TrainingDataSource):
         raise TypeError("data source must implement TrainingDataSource")
     if source.split != split:
@@ -3275,8 +3296,26 @@ class PhaseSetTrainingRuntime:
 
     def _validation(
         self,
-        source: TrainingDataSource,
+        source: TrainingDataSource | CaptureValidationSource,
     ) -> tuple[float, float, int, int]:
+        from .capture_validation import CaptureValidationSource, run_capture_validation
+
+        if not self.config.synthetic_contract:
+            from .capture_validation import _verified_capture_validation_bindings
+
+            CaptureValidationSource, run_capture_validation = _verified_capture_validation_bindings()
+        if type(source) is CaptureValidationSource:
+            checked = CaptureValidationSource(source.split, source.manifest_sha256, source.captures)
+            if checked.census_sha256 != self._val_manifest:
+                raise TrainingRuntimeError("capture validation census changed after fit admission")
+            edges = tuple(
+                window.groups.actor_counts[0] * (window.groups.actor_counts[0] - 1) // 2
+                for capture in checked.captures for window in capture.windows
+            )
+            result = run_capture_validation(self.system, self.config, checked)
+            if result.source_census_sha256 != self._val_manifest:
+                raise TrainingRuntimeError("scored capture census differs from admitted validation")
+            return float(result.primary_capture_r1), result.loss, sum(edges), max(edges)
         batches = _materialize_epoch(
             source,
             split="val",
@@ -3406,7 +3445,7 @@ class PhaseSetTrainingRuntime:
     def fit(
         self,
         train_source: TrainingDataSource,
-        val_source: TrainingDataSource,
+        val_source: TrainingDataSource | CaptureValidationSource,
         *,
         resume_checkpoint: str | Path | None = None,
         resume_checkpoint_sha256: str | None = None,
@@ -3418,7 +3457,10 @@ class PhaseSetTrainingRuntime:
 
         Validation alone selects the best checkpoint.  There is intentionally
         no test-source argument, and any source or batch labelled ``test`` is
-        rejected before a model forward.
+        rejected before a model forward. A concrete CaptureValidationSource
+        uses the complete holistic capture gallery; the existing window source
+        remains available for the separately declared auxiliary task. Capture
+        checkpoints bind the complete source census rather than actor-set IDs.
         """
 
         self._assert_live_formal_binding(require_initial_state=True)

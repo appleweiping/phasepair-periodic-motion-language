@@ -17,10 +17,11 @@ evidence, not training results or scientific claims.
   read-only inventory is complete. Existing workloads were not interrupted.
 - A separate data-volume Python 3.12.12 / NumPy 2.4.6 / Torch 2.12.0+cu126
   environment is installed with a clean dependency check. The complete Linux
-  CPU regression including the private-host lifecycle integration passed:
-  964 tests, 2 skipped, and 39 subtests, in 286.06 s after adding prepared-data
-  v2 host dispatch. Its focused integration passed 94 tests. Source bytes were
-  unchanged before and after both suites. The prior residual-resume integration
+  CPU regression including capture-level training selection passed:
+  1012 tests, 2 skipped, and 39 subtests, in 286.46 s. Its focused integration
+  passed 84 tests and 6 subtests. Source bytes were unchanged before and after
+  both suites. The prior prepared-data v2 host integration passed 94 focused /
+  964 complete tests. The prior residual-resume integration
   passed 948 tests and 39 subtests.
   The earlier frozen-CLIP integration passed 932 tests and 39 subtests.
   The earlier host-only suite passed 917 tests and its 25 focused checks.
@@ -51,8 +52,10 @@ evidence, not training results or scientific claims.
   passed: frozen-base maximum difference 7.153e-7, score difference 4.471e-8,
   and finite nonzero exercised head gradients. This did not run the periodic
   core or an optimizer. A subsequent B0 repeat stopped before model creation
-  for insufficient free memory; new-policy B1/B2 and full-runtime qualification
-  remain pending. See [runtime policy](docs/FROZEN_MHA_RUNTIME.md).
+  for insufficient free memory. After memory recovered, a distinct retry chain
+  passed retrieval/B0/B1/B2 with the same reviewed source and tolerance; the
+  original resource failure remains preserved. Full-training and BF16
+  qualification remain pending. See [runtime policy](docs/FROZEN_MHA_RUNTIME.md).
 - The native Embody loader and concrete licensed SMPL-X body-22 evaluator are
   implemented. Seven adapter contract tests passed on Linux/Python 3.12.12/
   NumPy 2.4.6; these use explicit fixtures, not licensed assets or main data.
@@ -61,9 +64,23 @@ evidence, not training results or scientific claims.
   It verifies the exact consumed index/manifest/payload bytes, rejects split
   overlap, and applies reproducible shared-group yaw from original bytes each
   training epoch. Validation is unrotated. Window-positive families support the
-  auxiliary task; the main holistic capture validation route is not yet wired.
+  auxiliary task; the private-host holistic capture source is not yet wired.
   Actor-set commitments must not be used as unique capture/window row IDs.
   See [prepared-data contract](docs/PREPARED_DATA_V2.md).
+- The complete-window capture evaluator now pools unnormalized embeddings
+  before one full-gallery scoring call and preserves exact capture-macro R@1
+  fractions. The training API uses this concrete val-only source for checkpoint
+  selection and binds its full census on resume. The standalone caller passed
+  42 focused / 997 complete server tests; the training integration passed 54
+  focused tests including actual optimizer/checkpoint/resume equality, followed
+  by complete 1002- and 1012-test regressions and actual CLIP requalifications. Two
+  legacy fixture failures from the first full attempt are retained and explained
+  in [test stability](docs/LEGACY_TEST_STABILITY.md). These are analytic lifecycle
+  checks, not formal runs. Actual scored-census consistency and scoped live
+  capture-function drift checks were added after provisional composition review.
+  Private-host disk composition
+  and licensed source/caption provenance remain incomplete. See
+  [capture validation](docs/CAPTURE_VALIDATION.md).
 - Neither Embody approval nor a licensed neutral model has been observed.
   Open-license Multi-TPC acquisition completed with its official byte count and
   MD5 verified. Its archive inventory has 322 files. The bounded audit confirms
@@ -82,7 +99,9 @@ evidence, not training results or scientific claims.
   The MHA-policy successor separately passed 33 focused/949 complete server
   tests and three official CLIP forwards, preserving the original output
   golden and RNG under correctly changed code/runtime/receipt identities.
-- The exact latest text-adapter commit was downloaded from anonymous codeload,
+  The capture-training successor also passed three official CLIP forwards with
+  both prior output digests and RNG unchanged under its new source identity.
+- The earlier text-adapter commit was downloaded from anonymous codeload,
   manifest/content/link checked, built offline into a wheel, and installed into
   a separate server target. All 56 wheel Python modules match the public Git
   index. Three real CLIP forwards from that installed wheel produced a complete

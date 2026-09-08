@@ -42,9 +42,12 @@ The last observation exercises the closed retrieval-head seam with analytic
 features, not the periodic core or an optimizer. It does not qualify full
 training, BF16, performance, data access, or a winning base checkpoint. A
 subsequent B0 requalification stopped before model construction because no GPU
-met the fixed 8 GiB free-memory requirement. B1/B2 were not run under the new
-policy after that stop. Their older observations remain historical, not new
-policy qualifications. Existing workloads were not interrupted.
+met the fixed 8 GiB free-memory requirement. Once memory became available, a
+separate resource-retry chain repeated retrieval and passed B0, B1, and B2 with
+the same reviewed source and unchanged numerical checks. That chain used new
+attempt directories; the failed resource receipt was not overwritten. These
+are bounded FP32 forward/backward observations, not optimizer, BF16, throughput,
+or full-training qualification. Existing workloads were not interrupted.
 
 ## CLIP and empirical boundaries
 
@@ -53,7 +56,8 @@ The frozen text adapter pins the entire installed training module, records
 configure the validated CPU runtime before loading it; the adapter does not
 silently alter global flags. See [the text adapter](FROZEN_CLIP_TEXT_ADAPTER.md).
 
-Main holistic validation must still aggregate every admitted window into one
-capture embedding and use true capture identities. Window scores and repeating
-actor-set lineage IDs are not a substitute. This runtime repair is not a
-completed empirical qualification or a scientific result.
+The [capture evaluator](CAPTURE_VALIDATION.md) now aggregates every admitted
+window into one capture embedding and uses true capture identities in the
+training API. Its private-host disk composition remains unfinished. Window
+scores and repeating actor-set lineage IDs are not a substitute. This runtime
+repair is not a completed empirical qualification or a scientific result.

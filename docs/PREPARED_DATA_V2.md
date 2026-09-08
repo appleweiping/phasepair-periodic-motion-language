@@ -41,7 +41,9 @@ Every uncompressed NPZ has exactly ten arrays:
 | `text_positive_ids` | uint8 `[Q,32]` |
 | `text_commitments` | uint8 `[Q,32]` |
 
-Padding is exact positive zero. Storage uses fixed-order ZIP_STORED members
+Padding is exact positive zero. Output creation is write-once with read-only
+file permissions; this is not operating-system immutability. Authenticated
+digests bind the bytes actually consumed. Storage uses fixed-order ZIP_STORED members
 and NPY v1 headers. Loading checks member identity, shape/type, declared byte
 length, CRC, and decoded-size bounds before array allocation; pickle is not
 accepted. The writer rejects train/val overlap in window, ordinal, caption,
@@ -65,8 +67,9 @@ bitwise equal to rotating earlier, before preprocessing's final float32 cast.
 
 The private build census binds index/batch/window/source/text digests and the
 independent ordinals. It contains no raw captions, source paths, or participant
-identifiers and is not a data-rights certificate. Keep the entire prepared tree,
-its commitments, and its census private.
+raw identifiers and is not a data-rights certificate. Stable commitments may
+still be linkable; they are not an anonymity guarantee. Keep the entire
+prepared tree, its commitments, and its census private.
 
 The private-host factory recognizes the v2 index and passes the actual
 receipt-bound index digest into this loader. A replaced index or manifest, or
@@ -78,7 +81,9 @@ support the auxiliary window-caption task, not the main holistic capture task.
 Actor-set group commitments are lineage, not unique capture/window row IDs.
 Main validation must separately encode every admitted window in a capture,
 aggregate embeddings with the fixed capture mean, and score one capture gallery
-against official holistic text. That training/host route is not yet connected.
+against official holistic text. The [capture validation API](CAPTURE_VALIDATION.md)
+now implements that operation and training checkpoint selection, but the
+private-host capture-source disk route is not yet connected to this storage.
 
 This module alone is not the complete `prepare-data` command. Native capture
 loading, licensed body-model conversion, preprocessing rejection/tail census,

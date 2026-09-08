@@ -223,3 +223,12 @@ official CLIP forwards preserved both output values above and caller RNG.
 The new receipt contains the new source/runtime identity and false MHA flag;
 it is intentionally not byte-identical to the historical receipt. These checks
 do not qualify CUDA text, full training, or real-data experiments.
+
+The later capture-training integration changed the exact training source to
+157160 bytes, SHA-256
+`9f6c21e354a17facda89a542d53e39013477c5e1b1a259781e2446cd394f6d06`.
+After its 1012-test complete server regression passed, another three official
+CLIP forwards passed. Both output digests above, repeated embedding equality,
+and caller RNG were unchanged. The adapter receipt correctly records the new
+training and adapter source identities; no golden was regenerated. This is a
+source-bound CPU feature-path requalification, not a real-data training result.

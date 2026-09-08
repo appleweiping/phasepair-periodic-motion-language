@@ -156,8 +156,8 @@ _EXPECTED_SOURCE_FILES: Final = (
     ),
     (
         "phaseset_core.training",
-        154_645,
-        "b1bbc5061a02aac1226ab00fd6eb970bf786cfe32b4d40ff0999dbebaaec60b4",
+        157_160,
+        "9f6c21e354a17facda89a542d53e39013477c5e1b1a259781e2446cd394f6d06",
     ),
 )
 

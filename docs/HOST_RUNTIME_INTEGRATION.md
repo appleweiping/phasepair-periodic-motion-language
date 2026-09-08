@@ -156,12 +156,13 @@ rights assertion when Embody approval is unknown.
 - The Embody-format conversion is outside this harness.  It must produce the
   exact prepared index/split/NPZ seam above and bind it to the authenticated
   prepared-data receipt.
-- The current training validation path is still window-oriented. V2 positive
-  families identify windows; actor-set group commitments are lineage and can
-  repeat across windows or captures. Neither is a substitute for the main
-  holistic capture gallery. Complete capture-window census, fixed embedding
-  aggregation, and capture-level scoring must be connected before formal base
-  selection on that task.
+- The training API now accepts the concrete val-only capture source described
+  in [capture validation](CAPTURE_VALIDATION.md), with complete-window pooling
+  and checkpoint-census binding. This host's v1/v2 on-disk prepared loaders still
+  return window sources. Their positive families and repeating actor-set
+  commitments cannot substitute for the main holistic capture gallery. The
+  private-host capture-source disk composition remains to be connected before
+  formal base selection on that task.
 - `run-residual` is wired through the strict qualified-base loader, canonical
   periodic-cache record, energy floors, canonical all-system capacity audit,
   closed residual constructor, and the same attempt ledger. Residual resume
