@@ -32,6 +32,13 @@ It canonicalizes capture and window order and checks duplicate/missing/foreign
 identities. Test cannot be relabeled through a split argument. Source plans,
 commitments, embeddings, captions, and component membership remain private.
 
+Optional [v2 storage lineage](CAPTURE_PREPARED_STORAGE.md) binds every window
+to its actual consumed manifest/NPZ and canonical global ordinal. A source
+must contain either no such lineage or a complete, single-manifest sequence.
+It does not change capture pooling, text order or gallery semantics, and it
+does not by itself connect descriptor caching to this evaluator. The separate
+prepared-window cache plan cannot replace holistic capture validation.
+
 ## Encoding and pooling
 
 The evaluator encodes every admitted window at B=1 with a registered retrieval

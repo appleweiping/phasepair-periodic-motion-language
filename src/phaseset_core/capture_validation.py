@@ -36,6 +36,7 @@ from .evaluation import (
 )
 from .frozen_clip_text import FrozenClipTextBatch, FrozenClipTextReceipt
 from .objectives import variable_positive_symmetric_infonce
+from .periodic_descriptor_cache_v2 import DescriptorWindowContext
 from .training import (
     BaseRetrievalSystem,
     ResidualRetrievalSystem,
@@ -204,11 +205,43 @@ def _validate_text_batch(
 
 
 @dataclass(frozen=True, slots=True, repr=False)
+class CaptureDescriptorWindowSource:
+    """Authenticated storage identities needed to resolve one descriptor row.
+
+    These values are integrity observations, not dataset or execution
+    authority.  The v2 storage loader populates them from bytes admitted under
+    its externally expected manifest digest.
+    """
+
+    storage_manifest_sha256: str
+    source_window_npz_sha256: str
+    window_ordinal: int
+
+    def __post_init__(self) -> None:
+        storage = _lower_sha256(
+            self.storage_manifest_sha256,
+            "storage_manifest_sha256",
+        )
+        source = _lower_sha256(
+            self.source_window_npz_sha256,
+            "source_window_npz_sha256",
+        )
+        if type(self.window_ordinal) is not int or not 0 <= self.window_ordinal < 2**64:
+            raise CaptureValidationError("window_ordinal must be an exact uint64")
+        object.__setattr__(self, "storage_manifest_sha256", storage)
+        object.__setattr__(self, "source_window_npz_sha256", source)
+
+
+@dataclass(frozen=True, slots=True, repr=False)
 class CaptureValidationWindow:
     """One actual accepted-window identity and its B=1 prepared motion row."""
 
     window_commitment: bytes
     groups: PreparedGroupBatch = field(repr=False)
+    descriptor_source: CaptureDescriptorWindowSource | None = field(
+        default=None,
+        repr=False,
+    )
 
     def __post_init__(self) -> None:
         window = _raw32(self.window_commitment, "window_commitment")
@@ -220,8 +253,40 @@ class CaptureValidationWindow:
             raise CaptureValidationError("capture validation encodes exactly B=1 per window")
         if groups.skeletons.shape[2] != 200 or not bool(groups.frame_mask.all()):
             raise CaptureValidationError("capture validation requires complete 200-frame windows")
+        descriptor_source = self.descriptor_source
+        if descriptor_source is not None and type(descriptor_source) is not CaptureDescriptorWindowSource:
+            raise CaptureValidationError(
+                "descriptor_source must be None or exact CaptureDescriptorWindowSource"
+            )
         object.__setattr__(self, "window_commitment", window)
         object.__setattr__(self, "groups", groups)
+        object.__setattr__(self, "descriptor_source", descriptor_source)
+
+    def descriptor_context(self, *, seed: int) -> DescriptorWindowContext:
+        """Return the formal val context for an authenticated v2 storage row."""
+
+        if type(seed) is not int or not 0 <= seed < 2**64:
+            raise CaptureValidationError("descriptor seed must be an exact uint64")
+        source = self.descriptor_source
+        if type(source) is not CaptureDescriptorWindowSource:
+            raise CaptureValidationError(
+                "capture window has no authenticated descriptor source lineage"
+            )
+        try:
+            return DescriptorWindowContext.from_yaw(
+                prepared_manifest_sha256=source.storage_manifest_sha256,
+                source_batch_sha256=source.source_window_npz_sha256,
+                window_sha256=self.window_commitment.hex(),
+                window_ordinal=source.window_ordinal,
+                split="val",
+                seed=seed,
+                epoch=0,
+                augmentation_yaw=0.0,
+            )
+        except (TypeError, ValueError) as error:
+            raise CaptureValidationError(
+                "capture descriptor context could not be constructed"
+            ) from error
 
     def __repr__(self) -> str:
         return "CaptureValidationWindow(B=1, <identity/features hidden>)"
@@ -259,7 +324,13 @@ class CaptureValidationCapture:
         for value in self.windows:
             if type(value) is not CaptureValidationWindow:
                 raise CaptureValidationError("capture window type is invalid")
-            rebuilt.append(CaptureValidationWindow(value.window_commitment, value.groups))
+            rebuilt.append(
+                CaptureValidationWindow(
+                    value.window_commitment,
+                    value.groups,
+                    value.descriptor_source,
+                )
+            )
         by_identity = {item.window_commitment: item for item in rebuilt}
         if (
             len(by_identity) != len(rebuilt)
@@ -396,8 +467,16 @@ class CaptureValidationSource:
             raise CaptureValidationError("capture identities must be globally unique")
         seen_windows: set[bytes] = set()
         seen_captions: set[bytes] = set()
+        descriptor_rows: list[CaptureDescriptorWindowSource] = []
+        window_count = 0
         for capture in ordered:
             windows = set(capture.plan.window_commitments)
+            window_count += len(capture.windows)
+            descriptor_rows.extend(
+                window.descriptor_source
+                for window in capture.windows
+                if window.descriptor_source is not None
+            )
             _, captions, _ = _validate_text_batch(capture.holistic_text)
             caption_set = set(captions)
             if seen_windows.intersection(windows):
@@ -406,6 +485,25 @@ class CaptureValidationSource:
                 raise CaptureValidationError("caption identities must be globally unique")
             seen_windows.update(windows)
             seen_captions.update(caption_set)
+        if descriptor_rows:
+            if len(descriptor_rows) != window_count:
+                raise CaptureValidationError(
+                    "capture source cannot mix v1 and v2 window lineage"
+                )
+            descriptor_manifest = descriptor_rows[0].storage_manifest_sha256
+            if any(
+                row.storage_manifest_sha256 != descriptor_manifest
+                for row in descriptor_rows
+            ):
+                raise CaptureValidationError(
+                    "capture descriptor rows must share one storage manifest"
+                )
+            if tuple(row.window_ordinal for row in descriptor_rows) != tuple(
+                range(window_count)
+            ):
+                raise CaptureValidationError(
+                    "capture descriptor ordinals must equal canonical global order"
+                )
         object.__setattr__(self, "manifest_sha256", manifest)
         object.__setattr__(self, "captures", ordered)
 
@@ -815,6 +913,7 @@ def _verified_capture_validation_bindings():
 
 
 __all__ = [
+    "CaptureDescriptorWindowSource",
     "CaptureValidationCapture",
     "CaptureValidationError",
     "CaptureValidationResourceLimit",

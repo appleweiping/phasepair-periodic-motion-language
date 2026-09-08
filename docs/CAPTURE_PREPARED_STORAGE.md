@@ -25,6 +25,30 @@ authenticated preparation record. Reading a digest from the same untrusted
 artifact is not authentication. The writer requires a new root; existing
 artifacts are not overwritten.
 
+## Descriptor source lineage in v2
+
+`write_capture_validation_source_v2` writes the additive v2 schema. The same
+loader accepts both versions. V1 remains the default writer and restores no
+descriptor lineage; it rejects attempts to discard existing v2 lineage.
+
+For each v2 window, the loader derives `CaptureDescriptorWindowSource` from
+the exact consumed storage-manifest digest, the verified window NPZ digest,
+and its canonical global ordinal. Global ordinals cover all windows in sorted
+capture-commitment and capture-plan order. They are neither capture-local
+positions nor source-frame starts.
+
+`window.descriptor_context(seed=...)` produces that window's val/epoch-zero/
+positive-zero-yaw context. The source rejects mixed v1/v2 lineage, multiple
+storage manifests and any noncanonical ordinal census. The upstream scientific
+manifest and complete source census retain their existing meanings; the
+storage-manifest binding is separate to avoid a circular digest.
+
+The server integration passed 92 focused and 1265 full tests, two existing
+skips and 39 subtests, with source unchanged. These are storage/software
+fixtures, not access approval, human annotation verification or a real cache.
+
+## Existing storage and provenance guarantees
+
 The manifest binds exact capture/window/caption counts, complete window plans,
 the upstream manifest and source census, every numeric artifact, original text
 receipts, caption lineage, output feature hashes and embedding cache keys.

@@ -13,6 +13,29 @@ evidence, not training results or scientific claims.
 
 ## Server continuation
 
+- The combined capture-lineage, prepared-window cache-plan and CUDA-workspace
+  correction passed 157 focused and 1285 full Linux server tests, two existing
+  skips and 39 subtests, with source unchanged. A separate actual K=32 GPU
+  retry completed B0/B1/B2 at full registered width and T=200: valid outputs,
+  unchanged model state, and exact zero allocated/reserved memory after each
+  release. Peak allocations were 81,548,800 / 94,160,384 / 315,323,392 bytes,
+  below the unchanged 2 GiB cap. The probe used untrained models and one warmup
+  plus one observed forward per model; it is not the formal 81-visit latency
+  session, a trained cohort, retrieval evidence or a performance benchmark.
+  Earlier failed attempts remain retained. See
+  [CUDA lifecycle correction](docs/BASE_COHORT_QUALIFICATION.md).
+
+- Capture-storage v2 now derives every descriptor context from the consumed
+  manifest/NPZ and canonical global window ordinal while keeping v1 and full
+  holistic-gallery semantics intact. It passed 92 focused and 1265 full
+  server tests, two existing skips and 39 subtests, source unchanged.
+  A separate prepared-window periodic plan passed 76 combined tests, admitting
+  the exact twenty-epoch source/cache census for each registered seed and
+  reopening each selected shard without fallback. It is not the main-task
+  capture cache or an integrated training/checkpoint/resume implementation.
+  See [capture storage](docs/CAPTURE_PREPARED_STORAGE.md) and
+  [window cache plan](docs/PERIODIC_TRAINING_CACHE_PLAN.md).
+
 - Prepared-v2 batches now retain their exact descriptor source/window/epoch/yaw
   contexts. Repeated rotation of an already contextualized batch is rejected.
   The live CLIP training-source pin was updated and actual official text

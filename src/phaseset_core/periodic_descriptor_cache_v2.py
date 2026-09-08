@@ -1354,6 +1354,12 @@ class PeriodicDescriptorCacheV2:
         self.index_sha256 = expected_index_sha256
         self._validate_tree_census()
 
+    @property
+    def cache_key_census(self) -> tuple[str, ...]:
+        """Return the closed sorted key census from the authenticated index."""
+
+        return tuple(self._rows)
+
     def _validate_tree_census(self) -> None:
         shards_path = self.root / "shards"
         _reject_symlink_components(shards_path, "descriptor shard directory")

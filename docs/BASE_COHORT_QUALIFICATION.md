@@ -49,8 +49,42 @@ a completed K32 model run or a formal latency session.
 
 The following actual K32 retry passed device initialization but failed the
 strict zero-allocation check when releasing B0. No completed model row was
-returned. Its failure and unchanged-source receipts are retained; allocator
-cleanup diagnosis is ongoing without changing the workload or resource limit.
+returned. Its failure and unchanged-source receipts remain retained; the
+following diagnosis and correction did not change the workload or limit.
+
+A separate actual diagnostic then found that B0's warmup and observed forward
+returned without an earlier exception. All model parameters and buffers were
+on CPU, but one 32 MiB process-local cuBLAS workspace remained. Garbage
+collection did not remove it; the installed cuBLAS workspace-clear API reduced
+both allocated and reserved memory to zero. That diagnostic still rethrew the
+original failure and did not produce a completed latency row.
+
+The release path now explicitly synchronizes and clears this process's cuBLAS
+workspaces before emptying the allocator cache and applying the original exact
+zero guard. Missing, noncallable or failing cleanup APIs raise a typed error;
+real remaining allocations still reject release. Device selection, the 2 GiB
+cap, the 8 GiB threshold, warmups, timing boundaries and visit order are
+unchanged. This cleanup does not stop or alter any other process.
+
+The corrected release path, capture lineage and window cache plan passed 157
+focused and 1285 full server tests, two existing skips and 39 subtests in
+512.46 seconds, with source unchanged. A subsequent actual K32 GPU retry
+completed B0, B1 and B2 using untrained registered-width models, T=200, one
+warmup and one observed FP32 forward each. All outputs were finite CUDA
+`[1,512]` tensors, model state was unchanged and each production release passed
+the unchanged exact-zero allocated/reserved guard.
+
+| Model | Peak allocated bytes | Peak reserved bytes |
+| --- | ---: | ---: |
+| B0 ActorMean | 81,548,800 | 102,760,448 |
+| B1 SetPMA | 94,160,384 | 119,537,664 |
+| B2 SocialTemporal | 315,323,392 | 375,390,208 |
+
+These are bounded diagnostic resource observations under the original 2 GiB
+cap and 8 GiB free-memory admission. They do not constitute the formal
+81-visit/99-samples-per-row session, latency qualification rows, trained
+checkpoints or retrieval-quality results. No diagnostic duration is used as a
+qualification tie-break. Every earlier failed attempt remains retained.
 
 The integrated UUID/source-lineage/text-boundary CPU regression passed 136
 focused tests and 1257 full tests, two existing skips and 39 subtests in

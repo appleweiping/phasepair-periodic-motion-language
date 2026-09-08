@@ -121,8 +121,13 @@ contexts from the actual consumed NPZ, split manifest, global window ordinal,
 seed, epoch and applied yaw. Legacy batches retain `None`, and a contextualized
 batch cannot be rotated again while keeping stale yaw metadata.
 
-Training initialization, admitted cache-row selection, complete epoch-cache
-census, and checkpoint/resume consumption still require explicit integration.
+The [prepared-window cache plan](PERIODIC_TRAINING_CACHE_PLAN.md) now admits
+an exact complete 20-epoch training census and one val/epoch-zero census for
+each official seed. Its selector reopens the authenticated reader on every
+request; the reader exposes only a read-only complete key-census tuple.
+This is an engineering window-validation seam, not holistic capture
+validation. Training initialization, complete-capture cache composition and
+checkpoint/resume consumption still require explicit integration.
 The model checks actual batch bytes but does not invent source window ordinals
 or silently select a different epoch/yaw context. Host preparation must supply
 the correct already verified reader handle. No real-data cache, acceleration,

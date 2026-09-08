@@ -23,6 +23,7 @@ import torch
 
 from .capture_pooling import CaptureWindowPlan
 from .capture_validation import (
+    CaptureDescriptorWindowSource,
     CaptureValidationCapture,
     CaptureValidationSource,
     CaptureValidationWindow,
@@ -32,7 +33,9 @@ from .frozen_clip_text import rehydrate_frozen_clip_text_batch
 
 
 AUTHORITY: Final = 0
-SCHEMA: Final = "phaseset-capture-prepared-storage-v1"
+SCHEMA_V1: Final = "phaseset-capture-prepared-storage-v1"
+SCHEMA_V2: Final = "phaseset-capture-prepared-storage-v2"
+SCHEMA: Final = SCHEMA_V1
 MANIFEST_NAME: Final = "capture-validation-manifest.json"
 WINDOW_KEYS: Final = (
     "skeletons",
@@ -582,16 +585,19 @@ def _add_materialized(total: int, amount: int, limits: CaptureStorageLimits) -> 
     return result
 
 
-def write_capture_validation_source(
+def _write_capture_validation_source(
     root: Path,
     source: CaptureValidationSource,
     *,
-    limits: CaptureStorageLimits = CaptureStorageLimits(),
+    limits: CaptureStorageLimits,
+    schema: str,
 ) -> CaptureStorageBuildResult:
-    """Write one new immutable artifact tree and return its exact receipt."""
+    """Write one new immutable artifact tree under an exact storage schema."""
 
     if type(limits) is not CaptureStorageLimits:
         raise CapturePreparedStorageError("limits must be exact CaptureStorageLimits")
+    if schema not in (SCHEMA_V1, SCHEMA_V2):
+        raise CapturePreparedStorageError("storage writer schema is not registered")
     checked = _snapshot_source(source)
     counts = _count_source(checked)
     _check_counts(counts, limits)
@@ -610,6 +616,7 @@ def write_capture_validation_source(
 
     capture_rows: list[dict[str, object]] = []
     total = 0
+    next_window_ordinal = 0
     for capture_index, capture in enumerate(checked.captures):
         window_rows: list[dict[str, object]] = []
         for window_index, (window, source_start) in enumerate(
@@ -645,15 +652,17 @@ def write_capture_validation_source(
             _groups_from_arrays(rebuilt)
             if rebuilt_bytes != decoded:
                 raise CapturePreparedStorageError("window decoded-byte census changed")
-            window_rows.append(
-                {
-                    "decoded_bytes": decoded,
-                    "path": relative,
-                    "sha256": _sha256(consumed),
-                    "source_start_frame": source_start,
-                    "window_commitment": window.window_commitment.hex(),
-                }
-            )
+            window_row = {
+                "decoded_bytes": decoded,
+                "path": relative,
+                "sha256": _sha256(consumed),
+                "source_start_frame": source_start,
+                "window_commitment": window.window_commitment.hex(),
+            }
+            if schema == SCHEMA_V2:
+                window_row["window_ordinal"] = next_window_ordinal
+            window_rows.append(window_row)
+            next_window_ordinal += 1
 
         expected_text_decoded = capture.holistic_text.receipt.output_bytes
         if (
@@ -737,7 +746,7 @@ def write_capture_validation_source(
             "captures": counts[0],
             "windows": counts[1],
         },
-        "schema": SCHEMA,
+        "schema": schema,
         "source_census_sha256": checked.census_sha256,
         "split": "val",
         "upstream_manifest_sha256": checked.manifest_sha256,
@@ -763,6 +772,46 @@ def write_capture_validation_source(
         window_count=counts[1],
         caption_count=counts[2],
         total_materialized_bytes=total,
+    )
+
+
+def write_capture_validation_source(
+    root: Path,
+    source: CaptureValidationSource,
+    *,
+    limits: CaptureStorageLimits = CaptureStorageLimits(),
+) -> CaptureStorageBuildResult:
+    """Write the unchanged v1 storage format for uncached validation."""
+
+    if type(source) is CaptureValidationSource and any(
+        window.descriptor_source is not None
+        for capture in source.captures
+        for window in capture.windows
+    ):
+        raise CapturePreparedStorageError(
+            "v1 storage cannot discard v2 descriptor source lineage"
+        )
+    return _write_capture_validation_source(
+        root,
+        source,
+        limits=limits,
+        schema=SCHEMA_V1,
+    )
+
+
+def write_capture_validation_source_v2(
+    root: Path,
+    source: CaptureValidationSource,
+    *,
+    limits: CaptureStorageLimits = CaptureStorageLimits(),
+) -> CaptureStorageBuildResult:
+    """Write v2 with canonical global descriptor-window ordinals."""
+
+    return _write_capture_validation_source(
+        root,
+        source,
+        limits=limits,
+        schema=SCHEMA_V2,
     )
 
 
@@ -805,7 +854,8 @@ def load_capture_validation_source(
         ),
         label="storage manifest",
     )
-    if _sha256(manifest_raw) != expected:
+    consumed_manifest_sha256 = _sha256(manifest_raw)
+    if consumed_manifest_sha256 != expected:
         raise CapturePreparedStorageError("consumed storage manifest SHA-256 mismatch")
     manifest = _parse_json(manifest_raw, "storage manifest")
     _closed(
@@ -821,10 +871,12 @@ def load_capture_validation_source(
         },
         "storage manifest",
     )
+    storage_schema = manifest["schema"]
     if (
         type(manifest["authority"]) is not int
         or manifest["authority"] != AUTHORITY
-        or manifest["schema"] != SCHEMA
+        or type(storage_schema) is not str
+        or storage_schema not in (SCHEMA_V1, SCHEMA_V2)
         or manifest["split"] != "val"
     ):
         raise CapturePreparedStorageError("storage manifest literals are invalid")
@@ -840,6 +892,7 @@ def load_capture_validation_source(
     observed_windows = 0
     observed_captions = 0
     prior_capture_id: bytes | None = None
+    next_window_ordinal = 0
     for capture_index, raw_capture in enumerate(rows):
         if type(raw_capture) is not dict:
             raise CapturePreparedStorageError("capture row must be an object")
@@ -879,17 +932,16 @@ def load_capture_validation_source(
         for window_index, raw_window in enumerate(window_rows):
             if type(raw_window) is not dict:
                 raise CapturePreparedStorageError("window row must be an object")
-            _closed(
-                raw_window,
-                {
-                    "decoded_bytes",
-                    "path",
-                    "sha256",
-                    "source_start_frame",
-                    "window_commitment",
-                },
-                "window row",
-            )
+            window_keys = {
+                "decoded_bytes",
+                "path",
+                "sha256",
+                "source_start_frame",
+                "window_commitment",
+            }
+            if storage_schema == SCHEMA_V2:
+                window_keys.add("window_ordinal")
+            _closed(raw_window, window_keys, "window row")
             decoded_expected = _positive_int(
                 raw_window["decoded_bytes"], "window decoded bytes"
             )
@@ -905,7 +957,11 @@ def load_capture_validation_source(
             seen_paths.add(expected_relative)
             path = _resolve_under(root, expected_relative, "window NPZ")
             raw = _read_bounded(path, maximum=limits.max_file_bytes, label="window NPZ")
-            if _sha256(raw) != _lower_sha256(raw_window["sha256"], "window SHA-256"):
+            source_window_npz_sha256 = _lower_sha256(
+                raw_window["sha256"],
+                "window SHA-256",
+            )
+            if _sha256(raw) != source_window_npz_sha256:
                 raise CapturePreparedStorageError("consumed window NPZ SHA-256 mismatch")
             arrays, decoded = _decode_npz(
                 raw,
@@ -926,7 +982,30 @@ def load_capture_validation_source(
             )
             window_ids.append(window_id)
             starts.append(_uint64(raw_window["source_start_frame"], "window start"))
-            windows.append(CaptureValidationWindow(window_id, _groups_from_arrays(arrays)))
+            if storage_schema == SCHEMA_V2:
+                window_ordinal = _uint64(
+                    raw_window["window_ordinal"],
+                    "window ordinal",
+                )
+                if window_ordinal != next_window_ordinal:
+                    raise CapturePreparedStorageError(
+                        "window ordinals must equal canonical global order"
+                    )
+                descriptor_source = CaptureDescriptorWindowSource(
+                    storage_manifest_sha256=consumed_manifest_sha256,
+                    source_window_npz_sha256=source_window_npz_sha256,
+                    window_ordinal=window_ordinal,
+                )
+            else:
+                descriptor_source = None
+            next_window_ordinal += 1
+            windows.append(
+                CaptureValidationWindow(
+                    window_id,
+                    _groups_from_arrays(arrays),
+                    descriptor_source,
+                )
+            )
 
         try:
             plan = CaptureWindowPlan(capture_id, tuple(window_ids), tuple(starts))

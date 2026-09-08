@@ -882,6 +882,23 @@ class _NvidiaSmiTorchRuntime:
     def release(self, system: training_module.BaseRetrievalSystem, device: torch.device) -> None:
         system.to(torch.device("cpu"))
         torch.cuda.synchronize(device)
+        try:
+            clear_cublas_workspaces = torch._C._cuda_clearCublasWorkspaces
+        except AttributeError as error:
+            raise BaseCohortLatencyError(
+                "Torch CUDA cuBLAS workspace clear API is unavailable"
+            ) from error
+        if not callable(clear_cublas_workspaces):
+            raise BaseCohortLatencyError(
+                "Torch CUDA cuBLAS workspace clear API is unavailable"
+            )
+        try:
+            clear_cublas_workspaces()
+        except Exception as error:
+            raise BaseCohortLatencyError(
+                "Torch CUDA cuBLAS workspace clear failed"
+            ) from error
+        torch.cuda.synchronize(device)
         torch.cuda.empty_cache()
         if torch.cuda.memory_allocated(device) != 0 or torch.cuda.memory_reserved(device) != 0:
             raise BaseCohortLatencyError(
