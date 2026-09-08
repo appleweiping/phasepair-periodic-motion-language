@@ -51,6 +51,7 @@ from phaseset_core.execution import (
     TerminalRecord,
     artifact_sha256,
     canonical_attempt_bytes,
+    canonical_public_training_config_bytes,
     parse_attempt_bytes,
     parse_checkpoint_bytes,
     parse_periodic_cache_bytes,
@@ -60,7 +61,9 @@ from phaseset_core.experiments import (
     SEEDS,
     BaseQualification,
     BaseScore,
+    build_experiment_plan,
     canonical_base_qualification_bytes,
+    experiment_plan_sha256,
     parse_run_id,
 )
 from phaseset_core.prepared_data_v2 import (
@@ -1597,6 +1600,7 @@ class PhaseSetHostBackend:
     def __init__(self, config: HostConfig, request: cli.CLICommandRequest) -> None:
         self._config = config
         self._request = request
+        self._admission_request: RuntimeAdmissionRequest | None = None
         self.backend_sha256 = _sha256_bytes(Path(__file__).read_bytes())
 
     def authenticate(
@@ -1608,11 +1612,43 @@ class PhaseSetHostBackend:
         del adapter_sha256
         if receipts != self._config.load_receipts():
             return False
-        # Receipt fields are checked against their exact artifacts above.  The
-        # public ProductionRuntimeAdapter binds plan/matrix/config/handler hashes.
-        return request.command == self._request.command
+        plan = build_experiment_plan()
+        if (
+            request.plan_sha256 != experiment_plan_sha256(plan)
+            or request.matrix_sha256 != plan.matrix_sha256
+            or request.training_config_sha256
+            != artifact_sha256(canonical_public_training_config_bytes())
+            or request.commands != ProductionRuntimeAdapter.commands
+            or request.handler_manifest_sha256
+            != ProductionRuntimeAdapter.handler_manifest_sha256
+        ):
+            return False
+        # RuntimeAdmissionRequest deliberately has no command field.  The backend
+        # is request-specific and execute() binds the later CommandIntent to that
+        # parsed CLI command.  Retain the exact runner-created admission request so
+        # attempt ledgers never read fields that CommandIntent does not define.
+        if self._admission_request is not None:
+            return request == self._admission_request
+        self._admission_request = request
+        return True
+
+    def _attempt_plan_bindings(self) -> tuple[str, str, str]:
+        request = self._admission_request
+        if request is None:
+            raise HostConfigurationError(
+                "runtime admission must complete before an attempt is created"
+            )
+        return (
+            request.plan_sha256,
+            request.matrix_sha256,
+            request.training_config_sha256,
+        )
 
     def execute(self, intent: CommandIntent) -> BackendExecution:
+        if intent.command != self._request.command:
+            raise HostConfigurationError(
+                "command intent differs from the request-specific host backend"
+            )
         if intent.command == "run-base":
             return self._run_base(intent)
         if intent.command == "run-residual":
@@ -1757,14 +1793,17 @@ class PhaseSetHostBackend:
         attempt_directory = checkpoint_directory.parent
         if attempt_directory.exists() or attempt_directory.is_symlink():
             raise HostConfigurationError("new attempt directory already exists")
+        plan_sha256, matrix_sha256, training_config_sha256 = (
+            self._attempt_plan_bindings()
+        )
         created_at = _utc_now()
         attempt = AttemptRecord(
             attempt_id=attempt_directory.name,
             run_id=request.run_id,
             created_at_utc=created_at,
-            plan_sha256=intent.plan_sha256,
-            matrix_sha256=intent.matrix_sha256,
-            training_config_sha256=intent.training_config_sha256,
+            plan_sha256=plan_sha256,
+            matrix_sha256=matrix_sha256,
+            training_config_sha256=training_config_sha256,
             source_tree_sha256=self._config.source_tree_sha256,
         )
         store = AttemptStore.create(attempt_directory.parent, attempt)
@@ -1825,6 +1864,9 @@ class PhaseSetHostBackend:
         attempt_directory = checkpoint_directory.parent
         if attempt_directory.exists() or attempt_directory.is_symlink():
             raise HostConfigurationError("new attempt directory already exists")
+        plan_sha256, matrix_sha256, training_config_sha256 = (
+            self._attempt_plan_bindings()
+        )
         _reject_symlink_components(request.base_checkpoint, "qualified base checkpoint")
         base_checkpoint = request.base_checkpoint.resolve()
         if not base_checkpoint.is_file():
@@ -1836,9 +1878,9 @@ class PhaseSetHostBackend:
             attempt_id=attempt_directory.name,
             run_id=request.run_id,
             created_at_utc=created_at,
-            plan_sha256=intent.plan_sha256,
-            matrix_sha256=intent.matrix_sha256,
-            training_config_sha256=intent.training_config_sha256,
+            plan_sha256=plan_sha256,
+            matrix_sha256=matrix_sha256,
+            training_config_sha256=training_config_sha256,
             source_tree_sha256=self._config.source_tree_sha256,
         )
         store = AttemptStore.create(attempt_directory.parent, attempt)

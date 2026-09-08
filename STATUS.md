@@ -23,11 +23,14 @@ evidence, not training results or scientific claims.
   not real data or measured acceleration. Training-row selection, complete
   epoch census and checkpoint/resume cache consumption remain unfinished.
   See [descriptor model integration](docs/PERIODIC_DESCRIPTOR_CACHE_V2.md).
-  A separate static audit also identified a host dispatch defect: new base
-  and residual attempts read two fields absent from the actual CommandIntent.
-  That repair and a real CLI-to-backend regression are in progress; existing
-  synthetic runtime checks must not be treated as proof that this host path
-  already works end to end.
+  The host now retains the canonical admitted plan/matrix/config instead of
+  reading fields absent from the actual command intent. Commands and handler
+  identity are checked before retaining the admission snapshot. Real
+  CLI-to-backend fixture regression passed 94 focused tests; full regression
+  passed 1232 tests, 2 existing skips and 39 subtests in 401.58 s, source
+  unchanged. The new CLI fixtures intentionally stop at the model-runtime
+  seam and retain FAILED terminals; they are not completed training runs.
+  See [host integration](docs/HOST_RUNTIME_INTEGRATION.md).
 
 - The complete frozen base-latency runner, exact qualification assembler,
   typed progress observer and durable POSIX journal are implemented. Separately,

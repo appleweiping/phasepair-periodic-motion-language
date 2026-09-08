@@ -20,6 +20,18 @@ It never creates authority, rights, runtime, or execution receipts.  If an
 artifact is absent or changed, the factory raises the existing
 `ExecutionHold` codes and the public CLI remains authority zero.
 
+Admission and command execution have distinct typed contracts.
+`RuntimeAdmissionRequest` carries the frozen plan, matrix, training-config,
+command census and handler digest; it has no per-command `command` field.
+`CommandIntent` carries the selected command and run, not matrix/config fields.
+The backend checks all five canonical admission bindings before retaining its
+one-shot snapshot. New base/residual attempt records obtain their three
+experiment digests from that retained admission, while dispatch checks the
+actual intent against the parsed request. A rejected admission cannot poison
+the snapshot and prevent a later canonical admission. Resume continues to
+inherit its verified predecessor binding. No extra operator hash approval is
+introduced.
+
 The factory dispatches v1 and v2 prepared indexes using the actual index bytes
 bound to the private prepared-data receipt. The v2 loader also verifies each
 consumed split manifest before decoding its numeric batches. Malformed batch
@@ -270,3 +282,15 @@ before/after identity check including `ctime`. Content digests, bounded reads,
 regular-file and symlink checks remain mandatory. Tests simulate the stable
 cross-interface difference and reject drift within either interface. Windows
 CI for the correction is a separate external acceptance check.
+
+The later admission/intent correction passed 94 focused Linux server tests
+and 1232 full tests, two existing skips and 39 subtests in 401.58 seconds.
+Source censuses remained unchanged. New tests enter the real public CLI,
+request-aware factory, production admission and backend with real typed
+requests. They create actual attempt ledgers, then deliberately raise at the
+typed base/residual model-runtime seam. Correct experiment bindings and
+durable FAILED terminals must exist; no runtime checkpoint is manufactured.
+Negative admissions with changed matrix, command census or handler digest
+leave the snapshot unbound and still allow the subsequent canonical request.
+These tests close the concrete missing-field/poisoning defects, not a complete
+licensed-data CLI training run or the unimplemented commands listed above.
