@@ -33,6 +33,9 @@ clip = [
   "requests==2.34.2",
   "transformers==4.57.3",
 ]
+embody = [
+  "smplx==0.1.28",
+]
 test = [
   "pytest==9.0.3",
   "ruff==0.15.22",

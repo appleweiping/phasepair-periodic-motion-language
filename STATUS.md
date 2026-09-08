@@ -1,14 +1,38 @@
 # PhaseSet project status
 
-**Evidence snapshot:** 2026-08-26 (Asia/Shanghai)
+**Evidence snapshot:** 2026-09-08 (UTC)
 **Research state:** `ACTIVE / AUTHORITY0 / NO_REAL_DATA_RESULT / NO_CLAIM`
-**Release target:** `v0.2.1 / PUBLIC_DATA_FREE_STABLE_CORE_PORTABLE_TEST_HOTFIX`
+**Published release:** `v0.2.1 / PUBLIC_DATA_FREE_STABLE_CORE_PORTABLE_TEST_HOTFIX`
+**Final target:** `v1.0.0 / REAL_EXPERIMENTS_AND_PAPER / NOT_COMPLETE`
 
 PhaseSet is the active multi-person successor to PhasePair. The in-place public
 migration and `v0.2.0-alpha.1` pre-release are complete; the immutable
 annotated PhasePair `v0.1.0` tag remains the dyadic compatibility baseline.
 Implemented code, passing synthetic tests, and frozen plans are software
 evidence, not training results or scientific claims.
+
+## Server continuation
+
+- Strict known-host SSH login to the registered host now succeeds. The initial
+  read-only inventory is complete. Existing workloads were not interrupted.
+- A separate data-volume Python environment is being built; CUDA libraries
+  are still downloading. No GPU qualification or real training has passed.
+- The native Embody loader and concrete licensed SMPL-X body-22 evaluator are
+  implemented. Six adapter contract tests passed on Linux/Python 3.12.12/
+  NumPy 2.4.6; these use explicit fixtures, not licensed assets or main data.
+- Neither Embody approval nor a licensed neutral model has been observed.
+  Open-license Multi-TPC acquisition is underway only for the registered
+  supplementary conversation task, not as replacement confirmatory data.
+- An actual Linux probe found last-bit formula-replay drift in both Morlet
+  banks. The original frozen kernel digests remain unchanged; portability is
+  being repaired and must pass server-side numerical tests before training.
+- The current no-result manuscript now builds using the hash-pinned official
+  ICASSP 2027 template: five pages, technical content through page four,
+  references-only page five, all fonts embedded, no unresolved citations or
+  overfull boxes. All result cells and pending author metadata remain explicit.
+
+This continuation is not a completed scientific release. Private receipts,
+data, model assets, connection details, and download material are not public.
 
 ## Completed in this migration
 
@@ -96,11 +120,11 @@ Embody 3D requires a real applicant to submit the official release form with
 true identity, institution, and email. No automation may invent those facts.
 Private download URLs and licensed assets stay outside Git.
 
-At `2026-08-26 03:17:33 +08:00`, the registered experiment server again
-actively refused the registered non-default SSH port before authentication.
-The next attempt may probe only that port, must verify the host key, and must
-begin with a read-only system/GPU inventory. No default-port scan or substitute
-host is authorized by the frozen contract.
+The earlier connection-refused state was superseded by successful strict
+known-host login on 2026-09-08 UTC. Only the registered port and host remain
+in scope. Resource availability, numerical qualification, and actual data
+access are separate observed requirements; SSH success alone is not a passed
+training environment.
 
 The GitHub repository was renamed in place to
 `appleweiping/phaseset-multiperson-motion-language`. Its numeric repository ID,
