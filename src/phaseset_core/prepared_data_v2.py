@@ -28,7 +28,11 @@ import numpy as np
 import torch
 
 from phaseset_core.contracts import PreparedGroupBatch
-from phaseset_core.frozen_clip_text import FrozenClipTextBatch, FrozenClipTextReceipt
+from phaseset_core.frozen_clip_text import (
+    MAX_BATCH_SIZE as CLIP_MAX_BATCH_SIZE,
+    FrozenClipTextBatch,
+    FrozenClipTextReceipt,
+)
 from phaseset_core.pipeline import (
     PreparedGroupSample,
     collate_group_samples,
@@ -291,9 +295,27 @@ class PreparedMotionTextBlock:
             _sha256_bytes(_tensor_bytes(embeddings[index : index + 1]))
             for index in range(len(lineage))
         )
+        # The receipt records configured inference chunk size, not total rows.
         if (
-            receipt.batch_size != len(lineage)
-            or tuple(row[0] for row in rows) != tuple(range(len(lineage)))
+            type(receipt.batch_size) is not int
+            or not 1 <= receipt.batch_size <= CLIP_MAX_BATCH_SIZE
+            or type(receipt.chunk_ranges) is not tuple
+            or any(
+                type(chunk) is not tuple
+                or len(chunk) != 2
+                or any(type(index) is not int for index in chunk)
+                for chunk in receipt.chunk_ranges
+            )
+        ):
+            raise PreparedDataV2Error("frozen text receipt chunk census is invalid")
+        expected_chunks = tuple(
+            (start, min(start + receipt.batch_size, len(lineage)))
+            for start in range(0, len(lineage), receipt.batch_size)
+        )
+        if receipt.chunk_ranges != expected_chunks:
+            raise PreparedDataV2Error("frozen text receipt chunk census is incomplete")
+        if (
+            tuple(row[0] for row in rows) != tuple(range(len(lineage)))
             or receipt.output_shape != tuple(embeddings.shape)
             or receipt.output_stride != tuple(embeddings.stride())
             or receipt.output_bytes != len(output)

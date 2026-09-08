@@ -13,6 +13,21 @@ evidence, not training results or scientific claims.
 
 ## Server continuation
 
+- The window-caption provenance component now checks the complete chain from
+  same-window fusion inputs/outputs through ordered frozen text rows to the
+  materialized training census. An actual official-CLIP probe exposed and fixed
+  a prepared-data bug: inference chunk size had been mistaken for total caption
+  count. Exact chunk coverage and all existing row/tensor/digest checks are now
+  retained together. The unchanged probe subsequently passed three actual
+  encoding chunks, prepared-tree reload and exact repeated provenance checks,
+  without re-encoding or observed CPU Torch RNG change. The original failure
+  remains retained. The source passed 53 focused / 1155 complete Linux server
+  tests, two existing skips and 39 subtests; complete regression took 316.45 s
+  with source unchanged. Fusion receipts, captions and motion in this probe
+  were explicit software fixtures. No fusion backend, licensed data, motion
+  training or formal supervision selection is claimed. See
+  [caption-role and text-chunk binding](docs/CAPTION_ROLE_PROVENANCE.md).
+
 - The completed-base resolver now reconstructs the exact nine registered
   successful chains, preserves failed predecessors, authenticates terminal-bound
   latest and distinct validation-best checkpoint bytes, and revalidates the

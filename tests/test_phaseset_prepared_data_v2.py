@@ -142,6 +142,50 @@ def _canonical_json(value: object) -> bytes:
     )
 
 
+@pytest.mark.parametrize("chunk_size", (1, 2, 3, 4, 8))
+def test_text_receipt_chunk_size_is_not_the_total_caption_census(chunk_size: int) -> None:
+    block = _block("chunked", (1, 3), (10, 11))
+    original = block.text_batch
+    chunk_ranges = tuple((start, min(start + chunk_size, 4)) for start in range(0, 4, chunk_size))
+    changed = clip.FrozenClipTextBatch(
+        original.embeddings,
+        original.caption_commitments,
+        replace(original.receipt, batch_size=chunk_size, chunk_ranges=chunk_ranges),
+        _seal=clip._CONSTRUCTION_SEAL,
+    )
+    rebuilt = replace(block, text_batch=changed)
+    assert rebuilt.text_counts == (1, 3)
+    assert len(rebuilt.text_batch.receipt.caption_rows) == 4
+    assert torch.equal(rebuilt.text_batch.embeddings, original.embeddings)
+
+
+@pytest.mark.parametrize(
+    ("chunk_size", "chunks"),
+    (
+        (False, ((0, 4),)),
+        (0, ((0, 4),)),
+        (257, ((0, 4),)),
+        (2, ((0, 2),)),
+        (2, ((2, 4), (0, 2))),
+        (2, ((0, 2), (1, 4))),
+        (2, ((0, 2), (2, 5))),
+        (2, ((False, 2), (2, 4))),
+        (2, [(0, 2), (2, 4)]),
+    ),
+)
+def test_text_receipt_rejects_invalid_or_incomplete_chunks(chunk_size, chunks) -> None:
+    block = _block("invalid-chunks", (1, 3), (10, 11))
+    original = block.text_batch
+    changed = clip.FrozenClipTextBatch(
+        original.embeddings,
+        original.caption_commitments,
+        replace(original.receipt, batch_size=chunk_size, chunk_ranges=chunks),
+        _seal=clip._CONSTRUCTION_SEAL,
+    )
+    with pytest.raises(prepared.PreparedDataV2Error, match="chunk census"):
+        replace(block, text_batch=changed)
+
+
 def test_write_load_variable_q_and_exact_ten_key_npz(tmp_path: Path) -> None:
     result = _write_tree(tmp_path / "prepared")
     assert result.authority == 0

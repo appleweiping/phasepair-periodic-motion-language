@@ -12,6 +12,10 @@ one `FrozenClipTextBatch`, variable per-motion `text_counts`, and independent
 uint64 `window_ordinals`. Every motion receives at least one text row; no fixed
 three-caption or two-caption assumption is made. The supplied frozen text
 receipt must bind the actual embedding bytes, row order, and commitments.
+Its `batch_size` denotes the CLIP inference chunk size, not total text rows.
+The exact contiguous `chunk_ranges` must cover the complete row census; all
+existing tensor and individual-row checks remain. See the
+[actual CLIP composition correction](CAPTION_ROLE_PROVENANCE.md).
 
 `write_prepared_training_tree_v2(...)` takes separate train/val blocks, an edge
 budget, optional microbatch-size bound, and explicit artifact-size bounds. It
@@ -82,8 +86,9 @@ Actor-set group commitments are lineage, not unique capture/window row IDs.
 Main validation must separately encode every admitted window in a capture,
 aggregate embeddings with the fixed capture mean, and score one capture gallery
 against official holistic text. The [capture validation API](CAPTURE_VALIDATION.md)
-now implements that operation and training checkpoint selection, but the
-private-host capture-source disk route is not yet connected to this storage.
+now implements that operation and training checkpoint selection. The separate
+capture-storage route is connected through the private host's combined index;
+it does not relabel this auxiliary window source as the primary task.
 
 This module alone is not the complete `prepare-data` command. Native capture
 loading, licensed body-model conversion, preprocessing rejection/tail census,
