@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 import hashlib
 import json
 import math
+import re
 import struct
 import subprocess
 import time
@@ -56,6 +57,9 @@ FIXTURE_EMBEDDING_DIM: Final = 512
 MINIMUM_FREE_MIB: Final = 8192
 CUDA_ALLOCATOR_LIMIT_BYTES: Final = 2 * 1024**3
 _ACTOR_DOMAIN: Final = b"phaseset-base-latency-actor-v1\n"
+_CUDA_UUID_PAYLOAD: Final = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+)
 
 
 class BaseCohortLatencyError(ValueError):
@@ -84,6 +88,33 @@ def _lower_sha256(value: object, label: str) -> str:
     ):
         raise BaseCohortLatencyError(f"{label} must be lowercase SHA-256 hex")
     return value
+
+
+def _prefixed_cuda_uuid(value: object, label: str) -> str:
+    if (
+        type(value) is not str
+        or not value.startswith("GPU-")
+        or _CUDA_UUID_PAYLOAD.fullmatch(value[4:]) is None
+    ):
+        raise BaseCohortLatencyError(
+            f"{label} must be GPU- plus one canonical lowercase CUDA UUID"
+        )
+    return value
+
+
+def _torch_cuda_uuid(value: object) -> str:
+    try:
+        rendered = str(value)
+    except Exception as error:
+        raise BaseCohortLatencyError(
+            "Torch device UUID cannot be rendered as a canonical CUDA UUID"
+        ) from error
+    payload = rendered[4:] if rendered.startswith("GPU-") else rendered
+    if _CUDA_UUID_PAYLOAD.fullmatch(payload) is None:
+        raise BaseCohortLatencyError(
+            "Torch device UUID is not a canonical lowercase CUDA UUID"
+        )
+    return f"GPU-{payload}"
 
 
 def _positive_int(value: object, label: str) -> int:
@@ -130,8 +161,7 @@ class SharedCudaObservation:
 
     def __post_init__(self) -> None:
         _positive_int(self.captured_unix_ns, "captured_unix_ns")
-        if type(self.device_uuid) is not str or not self.device_uuid.startswith("GPU-"):
-            raise BaseCohortLatencyError("CUDA observation UUID must be an exact GPU UUID")
+        _prefixed_cuda_uuid(self.device_uuid, "CUDA observation UUID")
         _positive_int(self.memory_total_mib, "memory_total_mib")
         _nonnegative_int(self.memory_free_mib, "memory_free_mib")
         _nonnegative_int(self.memory_used_mib, "memory_used_mib")
@@ -192,8 +222,7 @@ class BaseLatencyRuntimeIdentity:
             raise BaseCohortLatencyError("latency runtime device is invalid") from error
         if device.type != "cuda":
             raise BaseCohortLatencyError("formal latency runtime must be CUDA")
-        if type(self.device_uuid) is not str or not self.device_uuid.startswith("GPU-"):
-            raise BaseCohortLatencyError("latency runtime UUID is invalid")
+        _prefixed_cuda_uuid(self.device_uuid, "latency runtime UUID")
         for name in (
             "device_name",
             "torch_version",
@@ -501,10 +530,7 @@ class BaseCohortLatencySession:
     status: str = HOLD_STATUS
 
     def __post_init__(self) -> None:
-        if type(self.registered_cuda_uuid) is not str or not self.registered_cuda_uuid.startswith(
-            "GPU-"
-        ):
-            raise BaseCohortLatencyError("session CUDA UUID is invalid")
+        _prefixed_cuda_uuid(self.registered_cuda_uuid, "session CUDA UUID")
         _lower_sha256(self.resolved_cohort_sha256, "resolved_cohort_sha256")
         _lower_sha256(self.scored_cohort_sha256, "scored_cohort_sha256")
         if type(self.workload_receipt) is not BaseLatencyWorkloadReceipt:
@@ -732,7 +758,10 @@ class _NvidiaSmiTorchRuntime:
     __slots__ = ("_uuid",)
 
     def __init__(self, registered_cuda_uuid: str) -> None:
-        self._uuid = registered_cuda_uuid
+        self._uuid = _prefixed_cuda_uuid(
+            registered_cuda_uuid,
+            "registered CUDA UUID",
+        )
 
     def snapshot(self) -> SharedCudaObservation:
         query = (
@@ -786,7 +815,8 @@ class _NvidiaSmiTorchRuntime:
             raise BaseCohortLatencyError("formal latency CUDA device is unavailable")
         index = torch.cuda.current_device() if device.index is None else device.index
         properties = torch.cuda.get_device_properties(index)
-        observed_uuid = str(getattr(properties, "uuid", ""))
+        observed_uuid = _torch_cuda_uuid(getattr(properties, "uuid", None))
+        _prefixed_cuda_uuid(admission_observation.device_uuid, "admission CUDA UUID")
         if observed_uuid != self._uuid or admission_observation.device_uuid != self._uuid:
             raise BaseCohortLatencyError("Torch and NVIDIA device UUIDs differ")
         fraction = CUDA_ALLOCATOR_LIMIT_BYTES / int(properties.total_memory)
@@ -1276,8 +1306,7 @@ def run_base_cohort_latency_session(
         admission,
         scored_cohort,
     )
-    if type(registered_cuda_uuid) is not str or not registered_cuda_uuid.startswith("GPU-"):
-        raise BaseCohortLatencyError("registered_cuda_uuid must be an exact GPU UUID")
+    _prefixed_cuda_uuid(registered_cuda_uuid, "registered_cuda_uuid")
     if observer is not None and not isinstance(observer, LatencySessionObserver):
         raise BaseCohortLatencyError("latency observer does not implement the typed interface")
     device = torch.device(checked_admission.device)

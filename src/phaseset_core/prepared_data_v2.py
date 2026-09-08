@@ -7,8 +7,9 @@ caption text, loads a body model, grants rights, or executes a text model.
 The ten-array NPZ payload is an unaugmented canonical float32 window.  A v2
 split manifest binds one independent global uint64 window ordinal per motion.
 The training source rereads the authenticated NPZ for every epoch and applies
-the existing group_yaw_v2 angle once from (seed, epoch, ordinal).  Validation
-is never augmented.
+the existing group_yaw_v2 angle once from (seed, epoch, ordinal), then attaches
+the matching immutable descriptor contexts to that exact returned batch.
+Validation is never augmented and uses canonical epoch zero/+0 yaw contexts.
 """
 from __future__ import annotations
 
@@ -39,6 +40,7 @@ from phaseset_core.pipeline import (
     deterministic_group_yaw,
     edge_budget_batches,
 )
+from phaseset_core.periodic_descriptor_cache_v2 import DescriptorWindowContext
 from phaseset_core.training import RetrievalTrainingBatch
 
 
@@ -861,6 +863,61 @@ def _load_npz_training_batch(
     return _arrays_to_training_batch(arrays, split=split)
 
 
+def _descriptor_contexts(
+    batch: RetrievalTrainingBatch,
+    *,
+    prepared_manifest_sha256: str,
+    source_batch_sha256: str,
+    window_ordinals: tuple[int, ...],
+    seed: int,
+    epoch: int,
+) -> tuple[DescriptorWindowContext, ...]:
+    if len(window_ordinals) != batch.motion_count:
+        raise PreparedDataV2Error("window ordinal count differs from motion count")
+    context_epoch = epoch if batch.split == "train" else 0
+    contexts = []
+    for row, (positive_id, ordinal) in enumerate(
+        zip(batch.motion_positive_ids, window_ordinals, strict=True)
+    ):
+        yaw = (
+            deterministic_group_yaw(seed=seed, epoch=epoch, window_ordinal=ordinal)
+            if batch.split == "train"
+            else 0.0
+        )
+        try:
+            context = DescriptorWindowContext.from_yaw(
+                prepared_manifest_sha256=prepared_manifest_sha256,
+                source_batch_sha256=source_batch_sha256,
+                window_sha256=positive_id.hex(),
+                window_ordinal=ordinal,
+                split=batch.split,
+                seed=seed,
+                epoch=context_epoch,
+                augmentation_yaw=yaw,
+            )
+        except (TypeError, ValueError) as error:
+            raise PreparedDataV2Error(
+                f"prepared descriptor context {row} is invalid"
+            ) from error
+        contexts.append(context)
+    return tuple(contexts)
+
+
+def _with_descriptor_contexts(
+    batch: RetrievalTrainingBatch,
+    contexts: tuple[DescriptorWindowContext, ...],
+) -> RetrievalTrainingBatch:
+    return RetrievalTrainingBatch(
+        groups=batch.groups,
+        text_embeddings=batch.text_embeddings,
+        motion_positive_ids=batch.motion_positive_ids,
+        text_positive_ids=batch.text_positive_ids,
+        text_commitments=batch.text_commitments,
+        split=batch.split,
+        descriptor_contexts=contexts,
+    )
+
+
 def _rotate_training_batch(
     batch: RetrievalTrainingBatch,
     *,
@@ -868,6 +925,10 @@ def _rotate_training_batch(
     epoch: int,
     ordinals: tuple[int, ...],
 ) -> RetrievalTrainingBatch:
+    if batch.descriptor_contexts is not None:
+        raise PreparedDataV2Error(
+            "a batch with descriptor contexts cannot be rotated again"
+        )
     groups = batch.groups
     if len(ordinals) != groups.batch_size:
         raise PreparedDataV2Error("window ordinal count differs from motion count")
@@ -904,6 +965,7 @@ def _rotate_training_batch(
         text_positive_ids=batch.text_positive_ids,
         text_commitments=batch.text_commitments,
         split=batch.split,
+        descriptor_contexts=batch.descriptor_contexts,
     )
 
 
@@ -1031,14 +1093,23 @@ class PreparedTrainingDataSourceV2:
                 max_decoded_bytes=self._max_decoded_bytes,
             )
             if self.split == "train":
-                yield _rotate_training_batch(
+                prepared = _rotate_training_batch(
                     original,
                     seed=checked_seed,
                     epoch=checked_epoch,
                     ordinals=entry.window_ordinals,
                 )
             else:
-                yield original
+                prepared = original
+            contexts = _descriptor_contexts(
+                prepared,
+                prepared_manifest_sha256=self.manifest_sha256,
+                source_batch_sha256=entry.sha256,
+                window_ordinals=entry.window_ordinals,
+                seed=checked_seed,
+                epoch=checked_epoch,
+            )
+            yield _with_descriptor_contexts(prepared, contexts)
 
 
 def load_prepared_training_sources_v2(

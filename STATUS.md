@@ -13,6 +13,19 @@ evidence, not training results or scientific claims.
 
 ## Server continuation
 
+- Prepared-v2 batches now retain their exact descriptor source/window/epoch/yaw
+  contexts. Repeated rotation of an already contextualized batch is rejected.
+  The live CLIP training-source pin was updated and actual official text
+  embedding bytes remained unchanged. A separate actual diagnostic localized
+  a Torch/NVIDIA UUID-prefix mismatch; strict full-UUID matching now supports
+  the observed representation without bypassing device or resource checks.
+  The combined Linux server suite passed 136 focused tests and 1257 full
+  tests, 2 existing skips and 39 subtests in 413.42 s, source unchanged.
+  Complete training cache-plan/checkpoint/resume integration is still pending;
+  these observations are not real-data training or a K32 performance result.
+  See [source lineage](docs/PREPARED_DATA_V2.md) and
+  [CUDA identity](docs/BASE_COHORT_QUALIFICATION.md).
+
 - Explicit reader-backed cached model execution binds the actual complete
   batch, energy floors and stream family, and enforces the live encoder edge
   budget before consuming descriptors. The same stream is

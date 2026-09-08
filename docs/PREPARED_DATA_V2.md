@@ -67,6 +67,27 @@ Validation is unrotated. Masks, lineage, positive families, caption identity,
 and frozen text values do not change. This storage-based path is not claimed
 bitwise equal to rotating earlier, before preprocessing's final float32 cast.
 
+## Descriptor source context
+
+Actual returned `RetrievalTrainingBatch` values now carry an optional immutable
+`descriptor_contexts` tuple, one exact context per motion row. Prepared v2
+derives it from the same verified split-manifest bytes, consumed NPZ digest,
+global ordinal and motion-window identity used to load that row. Train contexts
+record the actual seed, epoch and exact float64 yaw bits. Validation keeps its
+historical unrotated iteration behavior while contexts use epoch zero and
+exact positive-zero yaw. Legacy batches default to `None`.
+
+Batch validation requires matching row identities/split, one common source,
+seed and epoch, and unique window identities/ordinals. The raw rotation helper
+rejects an already contextualized batch before converting arrays, preventing
+second rotation with stale first-rotation lineage. Numeric or padding changes
+remain distinct complete-batch cache digests even when lineage is unchanged.
+
+These contexts are integrity metadata, not cache admission, data rights or
+proof of execution. Epoch-complete cache lookup, training replay and checkpoint
+binding are separate unfinished layers; main holistic capture validation has
+its own source lineage and is not replaced by this window source.
+
 ## Provenance and integration boundary
 
 The private build census binds index/batch/window/source/text digests and the
@@ -103,3 +124,22 @@ creation, and invalid/replaced manifests and ZIP payloads. They are regression
 evidence, not real-data experiments or scientific results. The final combined
 host integration passed 94 focused tests and a separate complete Linux server
 suite of 964 tests, 2 skipped, and 39 subtests, with unchanged source bytes.
+
+Later source-lineage tests cover all three official seeds and all 20 residual
+epochs against the actual returned rotated values, canonical validation,
+legacy behavior and altered lineage/padding. The 89-test focused integration
+passed on the Linux server. A full integration exposed one old negative
+fixture whose deliberately changed family was now rejected earlier by the
+new batch invariant. Its context family was changed consistently to exercise
+the original caption-role rejection; the production validator and expected
+error were unchanged. The subsequent combined suite, including text-boundary
+and CUDA-identity contracts, passed 136 focused tests, then 1257 full tests,
+two existing skips and 39 subtests in 413.42 seconds, source unchanged.
+
+The live official CLIP adapter's imported training-boundary source pin was
+updated to the reviewed source bytes. An actual server call reproduced the
+earlier embedding bytes exactly, using four/two text rows in three chunks;
+CPU Torch RNG was unchanged and repeated provenance validation made no new
+encode call. Receipts retain new source identities without relabeling old
+receipts. Analytic motion and explicitly fabricated fusion fixtures in that
+check do not establish semantic caption quality or licensed main data.

@@ -59,6 +59,7 @@ from .models import (
     build_group_base,
 )
 from .objectives import PhaseSetRetrievalHead, variable_positive_symmetric_infonce
+from .periodic_descriptor_cache_v2 import DescriptorWindowContext
 
 
 STATUS: Final = "DATA_FREE_EXECUTABLE_TRAINING_RUNTIME_NONPRODUCTION_AUTHORITY0"
@@ -137,7 +138,9 @@ class RetrievalTrainingBatch:
     """One edge-budget microbatch with frozen text semantics.
 
     Positive-family identifiers are opaque commitments used only to construct
-    the variable-positive mask.  They never enter either neural tower.
+    the variable-positive mask.  They never enter either neural tower.  An
+    optional descriptor context tuple preserves authenticated prepared-source
+    lineage; its presence alone grants no cache, data, or execution authority.
     """
 
     groups: PreparedGroupBatch
@@ -146,6 +149,7 @@ class RetrievalTrainingBatch:
     text_positive_ids: tuple[bytes, ...]
     text_commitments: tuple[bytes, ...]
     split: Split
+    descriptor_contexts: tuple[DescriptorWindowContext, ...] | None = None
 
     def __post_init__(self) -> None:
         checked = validate_prepared_group_batch(self.groups)
@@ -199,6 +203,39 @@ class RetrievalTrainingBatch:
             raise TrainingRuntimeError("every motion must have a positive text in its microbatch")
         if any(value not in motions for value in texts):
             raise TrainingRuntimeError("every text must have a positive motion in its microbatch")
+        contexts = self.descriptor_contexts
+        if contexts is not None:
+            if type(contexts) is not tuple or len(contexts) != checked.batch_size:
+                raise TypeError(
+                    "descriptor_contexts must be None or an exact tuple covering every motion"
+                )
+            if any(type(context) is not DescriptorWindowContext for context in contexts):
+                raise TypeError(
+                    "descriptor_contexts must contain exact DescriptorWindowContext values"
+                )
+            first = contexts[0]
+            for index, context in enumerate(contexts):
+                if context.window_sha256 != motions[index].hex():
+                    raise TrainingRuntimeError(
+                        "descriptor window identity differs from its motion positive family"
+                    )
+                if context.split != self.split:
+                    raise TrainingRuntimeError(
+                        "descriptor context split differs from its training batch"
+                    )
+                if (
+                    context.prepared_manifest_sha256 != first.prepared_manifest_sha256
+                    or context.source_batch_sha256 != first.source_batch_sha256
+                    or context.seed != first.seed
+                    or context.epoch != first.epoch
+                ):
+                    raise TrainingRuntimeError(
+                        "one training batch cannot mix descriptor source, seed, or epoch"
+                    )
+            if len({context.window_sha256 for context in contexts}) != len(contexts):
+                raise TrainingRuntimeError("descriptor contexts repeat a window identity")
+            if len({context.window_ordinal for context in contexts}) != len(contexts):
+                raise TrainingRuntimeError("descriptor contexts repeat a window ordinal")
         # Snapshot text values so a host iterator cannot mutate an in-flight epoch.
         frozen_text = self.text_embeddings.detach().clone(memory_format=torch.contiguous_format)
         object.__setattr__(self, "groups", checked)
@@ -206,6 +243,7 @@ class RetrievalTrainingBatch:
         object.__setattr__(self, "motion_positive_ids", motions)
         object.__setattr__(self, "text_positive_ids", texts)
         object.__setattr__(self, "text_commitments", text_commitments)
+        object.__setattr__(self, "descriptor_contexts", contexts)
 
     @property
     def motion_count(self) -> int:

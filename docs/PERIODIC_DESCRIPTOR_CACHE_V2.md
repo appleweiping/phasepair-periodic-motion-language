@@ -116,9 +116,14 @@ The complete integrated source then passed 1228 tests, two existing skips and
 not licensed-data training, CUDA performance measurements or retrieval-quality
 evidence.
 
-Training initialization, the actual prepared-row context selector, complete
-epoch-cache census, and checkpoint/resume consumption still require explicit
-integration. The model checks actual batch bytes but does not invent source
-window ordinals or silently select a different epoch/yaw context. Host
-preparation must supply the correct already verified reader handle. No real-data
-cache, acceleration, measured throughput or model-quality result is claimed.
+The [prepared-v2 source](PREPARED_DATA_V2.md) now derives immutable descriptor
+contexts from the actual consumed NPZ, split manifest, global window ordinal,
+seed, epoch and applied yaw. Legacy batches retain `None`, and a contextualized
+batch cannot be rotated again while keeping stale yaw metadata.
+
+Training initialization, admitted cache-row selection, complete epoch-cache
+census, and checkpoint/resume consumption still require explicit integration.
+The model checks actual batch bytes but does not invent source window ordinals
+or silently select a different epoch/yaw context. Host preparation must supply
+the correct already verified reader handle. No real-data cache, acceleration,
+measured throughput or model-quality result is claimed.

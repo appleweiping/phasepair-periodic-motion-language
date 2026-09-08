@@ -35,6 +35,28 @@ The injected runtime seam is explicitly nonformal and exists for contract
 tests. It cannot produce an accepted actual-runtime qualification merely by
 finishing the same number of loops.
 
+An actual registered-server diagnostic found that NVIDIA returned the complete
+`GPU-`-prefixed UUID while Torch's CUDA UUID object rendered the same payload
+without that prefix. The runtime now accepts only those two complete canonical
+lowercase representations from Torch and compares the resulting full UUID
+exactly against both registration and the NVIDIA observation. Short forms,
+whitespace, uppercase payloads, repeated prefixes, MIG identifiers and changed
+payloads are rejected; this conversion cannot select or change the device.
+Tests prove invalid identities fail before allocator setup or tensor creation,
+and accepted representations preserve the original allocator cap. The original
+failed K32 observations remain retained; this identity correction alone is not
+a completed K32 model run or a formal latency session.
+
+The following actual K32 retry passed device initialization but failed the
+strict zero-allocation check when releasing B0. No completed model row was
+returned. Its failure and unchanged-source receipts are retained; allocator
+cleanup diagnosis is ongoing without changing the workload or resource limit.
+
+The integrated UUID/source-lineage/text-boundary CPU regression passed 136
+focused tests and 1257 full tests, two existing skips and 39 subtests in
+413.42 seconds with source unchanged. Its CUDA API stand-ins are explicitly
+software tests, not a substitute for the separate actual device observation.
+
 ## Qualification assembly
 
 `assemble_base_cohort_qualification` accepts the resolved cohort, admission,

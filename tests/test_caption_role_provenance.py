@@ -402,10 +402,16 @@ def test_rejects_materialized_positive_family_mutant(tmp_path, monkeypatch) -> N
         wrong = _raw("wrong-positive-family")
         motion_ids = (wrong, *first.motion_positive_ids[1:])
         text_ids = tuple(wrong if value == old else value for value in first.text_positive_ids)
+        assert first.descriptor_contexts is not None
+        contexts = (
+            replace(first.descriptor_contexts[0], window_sha256=wrong.hex()),
+            *first.descriptor_contexts[1:],
+        )
         yield replace(
             first,
             motion_positive_ids=motion_ids,
             text_positive_ids=text_ids,
+            descriptor_contexts=contexts,
         )
         yield from batches[1:]
 
