@@ -247,6 +247,12 @@ def _stat_identity(value: os.stat_result) -> tuple[int, int, int, int, int]:
     )
 
 
+def _cross_interface_identity(value: os.stat_result) -> tuple[int, int, int, int]:
+    # Windows path and descriptor APIs can expose different ctime semantics.
+    # Check ctime within each API before/after, never across the two APIs.
+    return (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns)
+
+
 def _read_bounded(path: Path, *, maximum: int, label: str) -> bytes:
     descriptor = -1
     try:
@@ -264,7 +270,8 @@ def _read_bounded(path: Path, *, maximum: int, label: str) -> bytes:
         opened_before = os.fstat(descriptor)
         if (
             not stat.S_ISREG(opened_before.st_mode)
-            or _stat_identity(path_before) != _stat_identity(opened_before)
+            or _cross_interface_identity(path_before)
+            != _cross_interface_identity(opened_before)
         ):
             raise CapturePreparedStorageError(f"{label} changed before it was opened")
         size = opened_before.st_size
@@ -281,7 +288,9 @@ def _read_bounded(path: Path, *, maximum: int, label: str) -> bytes:
         if (
             not stat.S_ISREG(path_after.st_mode)
             or _stat_identity(opened_before) != _stat_identity(opened_after)
-            or _stat_identity(opened_after) != _stat_identity(path_after)
+            or _stat_identity(path_before) != _stat_identity(path_after)
+            or _cross_interface_identity(opened_after)
+            != _cross_interface_identity(path_after)
             or len(raw) != size
         ):
             raise CapturePreparedStorageError(f"{label} changed while it was read")

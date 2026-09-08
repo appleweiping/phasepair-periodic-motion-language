@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -434,6 +435,70 @@ def test_bounded_read_rejects_leaf_replacement_between_lstat_and_open(
     with pytest.raises(storage.CapturePreparedStorageError, match="changed before"):
         storage._read_bounded(leaf, maximum=64, label="fixture")
     assert calls == 1
+
+
+def _stat_view(value: os.stat_result, **changes: int) -> SimpleNamespace:
+    fields = {
+        name: getattr(value, name)
+        for name in (
+            "st_mode", "st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns"
+        )
+    }
+    fields.update(changes)
+    return SimpleNamespace(**fields)
+
+
+def test_bounded_read_allows_stable_cross_api_ctime_difference(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    leaf = tmp_path / "ctime.bin"
+    leaf.write_bytes(b"unchanged")
+    real_fstat = storage.os.fstat
+
+    def distinct_ctime(descriptor: int) -> SimpleNamespace:
+        observed = real_fstat(descriptor)
+        return _stat_view(observed, st_ctime_ns=observed.st_ctime_ns + 1234567)
+
+    monkeypatch.setattr(storage.os, "fstat", distinct_ctime)
+    assert storage._read_bounded(leaf, maximum=64, label="fixture") == b"unchanged"
+
+
+@pytest.mark.parametrize("interface", ["lstat", "fstat"])
+def test_bounded_read_still_rejects_same_api_ctime_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, interface: str,
+) -> None:
+    leaf = tmp_path / "ctime.bin"
+    leaf.write_bytes(b"unchanged")
+    original = getattr(storage.os, interface)
+    calls = 0
+
+    def drifting_ctime(*args: object, **kwargs: object) -> SimpleNamespace:
+        nonlocal calls
+        observed = original(*args, **kwargs)
+        calls += 1
+        return _stat_view(observed, st_ctime_ns=observed.st_ctime_ns + calls)
+
+    monkeypatch.setattr(storage.os, interface, drifting_ctime)
+    with pytest.raises(storage.CapturePreparedStorageError, match="changed while"):
+        storage._read_bounded(leaf, maximum=64, label="fixture")
+    assert calls == 2
+
+
+@pytest.mark.parametrize("field", ["st_dev", "st_ino", "st_size", "st_mtime_ns"])
+def test_bounded_read_still_binds_cross_api_file_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str,
+) -> None:
+    leaf = tmp_path / "identity.bin"
+    leaf.write_bytes(b"unchanged")
+    real_fstat = storage.os.fstat
+
+    def mismatched_identity(descriptor: int) -> SimpleNamespace:
+        observed = real_fstat(descriptor)
+        return _stat_view(observed, **{field: getattr(observed, field) + 1})
+
+    monkeypatch.setattr(storage.os, "fstat", mismatched_identity)
+    with pytest.raises(storage.CapturePreparedStorageError, match="changed before"):
+        storage._read_bounded(leaf, maximum=64, label="fixture")
 
 
 @pytest.mark.parametrize("mutation", ["authority", "capture", "window", "caption"])

@@ -32,6 +32,12 @@ from typing import BinaryIO
 import numpy as np
 import torch
 from phaseset_core import cli
+from phaseset_core.capture_prepared_storage import (
+    CapturePreparedStorageError,
+    CaptureStorageLimits,
+    load_capture_validation_source,
+)
+from phaseset_core.capture_validation import CaptureValidationSource
 from phaseset_core.contracts import PreparedGroupBatch
 from phaseset_core.execution import (
     AttemptRecord,
@@ -57,15 +63,15 @@ from phaseset_core.experiments import (
     canonical_base_qualification_bytes,
     parse_run_id,
 )
-from phaseset_core.production import (
-    BackendExecution,
-    PrivateReceiptAssertions,
-    ProductionRuntimeAdapter,
-)
 from phaseset_core.prepared_data_v2 import (
     PREPARED_INDEX_V2_SCHEMA,
     PreparedDataV2Error,
     load_prepared_training_sources_v2,
+)
+from phaseset_core.production import (
+    BackendExecution,
+    PrivateReceiptAssertions,
+    ProductionRuntimeAdapter,
 )
 from phaseset_core.training import (
     CheckpointArtifact,
@@ -74,8 +80,8 @@ from phaseset_core.training import (
     RetrievalTrainingBatch,
     TrainingConfig,
     TrainingDataSource,
-    TrainingRuntimeError,
     TrainingReport,
+    TrainingRuntimeError,
     construct_registered_base_seed_bound_system,
     construct_registered_residual_seed_bound_system,
     load_qualified_frozen_base,
@@ -84,6 +90,10 @@ from phaseset_core.training import (
 HOST_CONFIG_SCHEMA = "phaseset-private-host-v1"
 PREPARED_INDEX_SCHEMA = "phaseset-prepared-index-v1"
 PREPARED_SPLIT_SCHEMA = "phaseset-prepared-training-split-v1"
+CAPTURE_VALIDATION_INDEX_SCHEMA = "phaseset-host-capture-validation-index-v1"
+CAPTURE_VALIDATION_KIND = "capture-validation-storage-v1"
+PREPARED_TRAIN_V1_KIND = "prepared-training-index-v1"
+PREPARED_TRAIN_V2_KIND = "prepared-training-index-v2"
 PERIODIC_CACHE_MAX_BYTES = 1024 * 1024
 PREPARED_BATCH_KEYS = frozenset(
     {
@@ -220,6 +230,17 @@ def _sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def _lower_sha256(value: object, label: str) -> str:
+    if (
+        type(value) is not str
+        or len(value) != 64
+        or value.lower() != value
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise HostConfigurationError(f"{label} must be lowercase SHA-256 hex")
+    return value
+
+
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -256,6 +277,19 @@ def _load_json_object(path: Path, label: str) -> tuple[bytes, dict[str, object]]
     if type(value) is not dict:
         raise HostConfigurationError(f"{label} must contain one JSON object")
     return raw, value
+
+
+def _require_canonical_json_object(
+    raw: bytes,
+    value: Mapping[str, object],
+    label: str,
+) -> None:
+    try:
+        canonical = _canonical_json_bytes(value)
+    except (TypeError, ValueError, OverflowError, RecursionError) as error:
+        raise HostConfigurationError(f"{label} is not canonical JSON") from error
+    if raw != canonical:
+        raise HostConfigurationError(f"{label} bytes are not canonical")
 
 
 def _closed_keys(value: Mapping[str, object], expected: set[str], label: str) -> None:
@@ -825,11 +859,15 @@ class HostConfig:
 
     def load_sources(
         self,
-    ) -> tuple[TrainingDataSource, TrainingDataSource]:
+    ) -> tuple[TrainingDataSource, TrainingDataSource | CaptureValidationSource]:
         raw, value = _load_json_object(self.prepared_index, "prepared index")
         _closed_keys(value, {"schema", "train", "val"}, "prepared index")
         schema = value["schema"]
-        if schema not in {PREPARED_INDEX_SCHEMA, PREPARED_INDEX_V2_SCHEMA}:
+        if type(schema) is not str or schema not in {
+            PREPARED_INDEX_SCHEMA,
+            PREPARED_INDEX_V2_SCHEMA,
+            CAPTURE_VALIDATION_INDEX_SCHEMA,
+        }:
             raise HostConfigurationError("prepared index schema is not registered")
         receipts = self.load_receipts()
         if _sha256_bytes(raw) != receipts.prepared_data_manifest_sha256:
@@ -847,6 +885,9 @@ class HostConfig:
                 raise HostConfigurationError(
                     "prepared v2 source is invalid"
                 ) from error
+        if schema == CAPTURE_VALIDATION_INDEX_SCHEMA:
+            _require_canonical_json_object(raw, value, "capture-validation index")
+            return self._load_capture_validation_sources(value)
         sources: list[PrivatePreparedDataSource] = []
         for split in ("train", "val"):
             item = value[split]
@@ -869,6 +910,269 @@ class HostConfig:
                 )
             sources.append(source)
         return sources[0], sources[1]
+
+    def _load_capture_validation_sources(
+        self,
+        value: Mapping[str, object],
+    ) -> tuple[TrainingDataSource, CaptureValidationSource]:
+        train_row = value["train"]
+        val_row = value["val"]
+        if type(train_row) is not dict or type(val_row) is not dict:
+            raise HostConfigurationError(
+                "capture-validation index train and val rows must be objects"
+            )
+        _closed_keys(
+            train_row,
+            {"kind", "path", "sha256"},
+            "capture-validation training row",
+        )
+        _closed_keys(
+            val_row,
+            {
+                "kind",
+                "path",
+                "sha256",
+                "source_census_sha256",
+                "upstream_manifest_sha256",
+            },
+            "capture-validation val row",
+        )
+        train_kind = train_row["kind"]
+        if type(train_kind) is not str or train_kind not in {
+            PREPARED_TRAIN_V1_KIND,
+            PREPARED_TRAIN_V2_KIND,
+        }:
+            raise HostConfigurationError(
+                "capture-validation training kind is not registered"
+            )
+        if type(val_row["kind"]) is not str or val_row["kind"] != CAPTURE_VALIDATION_KIND:
+            raise HostConfigurationError(
+                "capture-validation val kind is not registered"
+            )
+        train_digest = _lower_sha256(
+            train_row["sha256"],
+            "capture-validation training index SHA-256",
+        )
+        val_digest = _lower_sha256(
+            val_row["sha256"],
+            "capture-validation storage manifest SHA-256",
+        )
+        expected_census = _lower_sha256(
+            val_row["source_census_sha256"],
+            "capture-validation source census SHA-256",
+        )
+        expected_upstream = _lower_sha256(
+            val_row["upstream_manifest_sha256"],
+            "capture-validation upstream manifest SHA-256",
+        )
+        train_path = _resolve_under(
+            self.prepared_index.parent,
+            train_row["path"],
+            "capture-validation training index",
+        )
+        val_path = _resolve_under(
+            self.prepared_index.parent,
+            val_row["path"],
+            "capture-validation storage manifest",
+        )
+        if train_path == val_path:
+            raise HostConfigurationError(
+                "capture-validation train and val artifacts must be distinct"
+            )
+        train = self._load_registered_training_index(
+            train_path,
+            expected_sha256=train_digest,
+            expected_kind=train_kind,
+        )
+        try:
+            val = load_capture_validation_source(
+                val_path,
+                expected_manifest_sha256=val_digest,
+                limits=CaptureStorageLimits(
+                    max_file_bytes=self.max_batch_bytes,
+                    max_decoded_file_bytes=self.max_batch_bytes,
+                ),
+            )
+        except CapturePreparedStorageError as error:
+            raise HostConfigurationError(
+                "capture-validation val storage is invalid"
+            ) from error
+        if type(val) is not CaptureValidationSource or val.split != "val":
+            raise HostConfigurationError(
+                "capture-validation loader did not return an exact val source"
+            )
+        if val.census_sha256 != expected_census:
+            raise HostConfigurationError(
+                "capture-validation source census differs from its index"
+            )
+        if val.manifest_sha256 != expected_upstream:
+            raise HostConfigurationError(
+                "capture-validation upstream manifest differs from its index"
+            )
+        if not isinstance(train, TrainingDataSource) or train.split != "train":
+            raise HostConfigurationError(
+                "capture-validation training index did not produce a train source"
+            )
+        self._reject_capture_training_identity_overlap(
+            train,
+            val,
+            compare_window_identities=(train_kind == PREPARED_TRAIN_V2_KIND),
+        )
+        return train, val
+
+    @staticmethod
+    def _reject_capture_training_identity_overlap(
+        train: TrainingDataSource,
+        val: CaptureValidationSource,
+        *,
+        compare_window_identities: bool,
+    ) -> None:
+        """Read every concrete train batch and reject exact val identity reuse.
+
+        Actor commitments identify prepared tracks, not participant identities.
+        Participant-level disjointness remains the authenticated split audit's
+        responsibility. Prepared-data v2, unlike v1, freezes each motion positive
+        identity as the source window SHA-256, so only v2 admits the window check.
+        """
+
+        train_manifest = _lower_sha256(
+            train.manifest_sha256,
+            "capture-validation train manifest SHA-256",
+        )
+        val_census = val.census_sha256
+        val_actors = {
+            actor
+            for capture in val.captures
+            for window in capture.windows
+            for actor in window.groups.actor_commitments[0]
+            if actor is not None
+        }
+        val_captions = {
+            commitment
+            for capture in val.captures
+            for commitment in capture.holistic_text.caption_commitments
+        }
+        val_windows = {
+            commitment
+            for capture in val.captures
+            for commitment in capture.plan.window_commitments
+        }
+        batch_count = 0
+        try:
+            # Registered v1/v2 sources expose their complete immutable artifact
+            # census through iter_epoch. Seed/epoch zero only fixes deterministic
+            # order and v2 yaw; neither path consumes a global RNG.
+            for batch in train.iter_epoch(epoch=0, seed=0):
+                if type(batch) is not RetrievalTrainingBatch or batch.split != "train":
+                    raise HostConfigurationError(
+                        "capture-validation train identity scan returned an invalid batch"
+                    )
+                batch_count += 1
+                train_actors = {
+                    actor
+                    for row in batch.groups.actor_commitments
+                    for actor in row
+                    if actor is not None
+                }
+                if train_actors & val_actors:
+                    raise HostConfigurationError(
+                        "capture-validation train and val reuse an actor/track identity"
+                    )
+                if set(batch.text_commitments) & val_captions:
+                    raise HostConfigurationError(
+                        "capture-validation train and val reuse a caption identity"
+                    )
+                if (
+                    compare_window_identities
+                    and set(batch.motion_positive_ids) & val_windows
+                ):
+                    raise HostConfigurationError(
+                        "capture-validation train and val reuse a window identity"
+                    )
+        except HostConfigurationError:
+            raise
+        except Exception as error:
+            raise HostConfigurationError(
+                "capture-validation train identity scan failed"
+            ) from error
+        if batch_count == 0:
+            raise HostConfigurationError(
+                "capture-validation train identity scan returned no batches"
+            )
+        if train.manifest_sha256 != train_manifest:
+            raise HostConfigurationError(
+                "capture-validation train source changed during identity scan"
+            )
+        if val.census_sha256 != val_census:
+            raise HostConfigurationError(
+                "capture-validation val source changed during identity scan"
+            )
+
+    def _load_registered_training_index(
+        self,
+        path: Path,
+        *,
+        expected_sha256: str,
+        expected_kind: str,
+    ) -> TrainingDataSource:
+        raw, value = _load_json_object(path, "referenced training index")
+        if _sha256_bytes(raw) != expected_sha256:
+            raise HostConfigurationError(
+                "referenced training index differs from its exact digest"
+            )
+        _require_canonical_json_object(raw, value, "referenced training index")
+        _closed_keys(
+            value,
+            {"schema", "train", "val"},
+            "referenced training index",
+        )
+        expected_schema = {
+            PREPARED_TRAIN_V1_KIND: PREPARED_INDEX_SCHEMA,
+            PREPARED_TRAIN_V2_KIND: PREPARED_INDEX_V2_SCHEMA,
+        }[expected_kind]
+        if value["schema"] != expected_schema:
+            raise HostConfigurationError(
+                "referenced training index schema differs from its kind"
+            )
+        if expected_schema == PREPARED_INDEX_V2_SCHEMA:
+            try:
+                train, _auxiliary_window_val = load_prepared_training_sources_v2(
+                    path,
+                    expected_index_sha256=expected_sha256,
+                    max_batch_bytes=self.max_batch_bytes,
+                )
+            except (PreparedDataV2Error, TrainingRuntimeError) as error:
+                raise HostConfigurationError(
+                    "referenced prepared v2 training source is invalid"
+                ) from error
+            return train
+        sources: list[PrivatePreparedDataSource] = []
+        for split in ("train", "val"):
+            row = value[split]
+            if type(row) is not dict:
+                raise HostConfigurationError(
+                    f"referenced prepared v1 {split} row must be an object"
+                )
+            _closed_keys(
+                row,
+                {"path", "sha256"},
+                f"referenced prepared v1 {split} row",
+            )
+            split_manifest = _resolve_under(
+                path.parent,
+                row["path"],
+                f"referenced prepared v1 {split} manifest",
+            )
+            source = PrivatePreparedDataSource(
+                split_manifest,
+                max_batch_bytes=self.max_batch_bytes,
+            )
+            if source.manifest_sha256 != row["sha256"] or source.split != split:
+                raise HostConfigurationError(
+                    f"referenced prepared v1 {split} source differs from its index"
+                )
+            sources.append(source)
+        return sources[0]
 
 
 def _jsonable(value: object) -> object:
@@ -1889,8 +2193,8 @@ class RuntimeAdapterFactory:
             config = HostConfig.load(self._config_path)
             receipts = config.load_receipts()
             config.validate_runtime()
-            # Preflight must prove that the authenticated prepared index and all
-            # immutable batch digests are present, without materializing tensors.
+            # Preflight verifies the authenticated prepared tree, materializes the
+            # bounded capture source, and streams every concrete train batch once.
             config.load_sources()
         except (HostConfigurationError, OSError, TypeError, ValueError) as error:
             text = str(error).lower()

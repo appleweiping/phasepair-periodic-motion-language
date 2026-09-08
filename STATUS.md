@@ -17,9 +17,11 @@ evidence, not training results or scientific claims.
   read-only inventory is complete. Existing workloads were not interrupted.
 - A separate data-volume Python 3.12.12 / NumPy 2.4.6 / Torch 2.12.0+cu126
   environment is installed with a clean dependency check. The complete Linux
-  CPU regression including capture storage and frozen-text restoration passed:
-  1043 tests, 2 skipped, and 39 subtests, in 298.12 s. Its focused integration
-  passed 110 tests. The preceding capture-training integration passed 1012
+  CPU regression including capture host composition, storage portability and
+  frozen-text restoration passed: 1077 tests, 2 skipped, and 39 subtests, in
+  296.55 s. Its focused integration passed 103 tests. The preceding capture
+  host integration passed 96 focused / 1070 complete tests; the earlier storage
+  integration passed 110 focused / 1043 complete tests. The preceding capture-training integration passed 1012
   complete / 84 focused tests and 6 focused subtests. Source bytes were unchanged before and after
   both suites. The prior prepared-data v2 host integration passed 94 focused /
   964 complete tests. The prior residual-resume integration
@@ -74,7 +76,8 @@ evidence, not training results or scientific claims.
   It verifies the exact consumed index/manifest/payload bytes, rejects split
   overlap, and applies reproducible shared-group yaw from original bytes each
   training epoch. Validation is unrotated. Window-positive families support the
-  auxiliary task; the private-host holistic capture source is not yet wired.
+  auxiliary task; a separate combined index now connects the private-host
+  holistic capture source without relabeling auxiliary validation data.
   Actor-set commitments must not be used as unique capture/window row IDs.
   See [prepared-data contract](docs/PREPARED_DATA_V2.md).
 - The complete-window capture evaluator now pools unnormalized embeddings
@@ -88,8 +91,11 @@ evidence, not training results or scientific claims.
   in [test stability](docs/LEGACY_TEST_STABILITY.md). These are analytic lifecycle
   checks, not formal runs. Actual scored-census consistency and scoped live
   capture-function drift checks were added after provisional composition review.
-  Private-host disk composition
-  and licensed source/caption provenance remain incomplete. See
+  The private host now composes authenticated window training and capture
+  validation from disk, checking actual actor/caption/window overlap before
+  backend construction and forwarding the exact capture source through both
+  base/residual and resume paths. Licensed source/caption provenance and
+  participant-disjoint input preparation remain incomplete. See
   [capture validation](docs/CAPTURE_VALIDATION.md).
 - A bounded validation-only capture storage writer/reader now preserves the
   complete window plan, original padding, variable caption counts and original
@@ -101,6 +107,15 @@ evidence, not training results or scientific claims.
   The original output goldens and observed CPU Torch RNG were unchanged.
   Storage is not a rights, annotation, split or anonymization proof. See
   [capture storage](docs/CAPTURE_PREPARED_STORAGE.md).
+- The preceding capture-storage commit failed 14 tests on each Windows CI
+  runtime while its Ubuntu audit succeeded. A read-only filesystem diagnostic
+  found different path-stat and descriptor-stat `ctime` values for the same
+  unchanged file. The correction preserves complete before/after checks within
+  each interface, compares stable identity fields across interfaces, and keeps
+  all content-digest and bounded-read checks. Seven added cases cover this
+  distinction and actual drift. The 103 / 1077 server tests above and the
+  unchanged real CLIP cache observation passed. Windows acceptance of this
+  correction requires its own GitHub CI result; no failed check was skipped.
 - Neither Embody approval nor a licensed neutral model has been observed.
   Open-license Multi-TPC acquisition completed with its official byte count and
   MD5 verified. Its archive inventory has 322 files. The bounded audit confirms
@@ -126,6 +141,12 @@ evidence, not training results or scientific claims.
   a separate server target. All 56 wheel Python modules match the public Git
   index. Three real CLIP forwards from that installed wheel produced a complete
   observation byte-identical to the previously verified source copy.
+- The subsequent public capture-storage commit was also anonymously downloaded,
+  checked against its 223-file manifest, and built offline into a separate
+  wheel target. All 60 Python modules matched the source. Three actual CLIP
+  forwards and two disk restorations from the installed wheel produced the
+  same complete observation as the server source. This Linux packaging check
+  does not close the Windows filesystem-portability failure described above.
 - Native Linux last-bit Morlet formula drift is repaired using strictly
   verified canonical coefficient bytes, while preserving both original hashes.
   Windows still requires its original exact formula digest; Linux requires its

@@ -47,6 +47,47 @@ unrotated training bytes. Its validation source is unrotated. See
 [prepared-data v2](PREPARED_DATA_V2.md) for the writer, bounded numeric format,
 split checks, and provenance limits. Neither loader establishes data rights.
 
+## Main holistic capture validation
+
+The additional closed `phaseset-host-capture-validation-index-v1` composes an
+existing prepared training index with validation-only
+[capture storage](CAPTURE_PREPARED_STORAGE.md). The combined index bytes are
+bound to the same private prepared-data receipt. Both the outer index and the
+referenced training index must equal canonical ASCII JSON bytes, not merely
+parse to equivalent objects. Duplicate keys and noncanonical encodings are
+rejected even when a supplied digest matches them.
+
+Its `train` row has exactly `kind/path/sha256`. The kind is
+`prepared-training-index-v1` or `prepared-training-index-v2` and must match the
+actual referenced schema. That complete old index is validated, then only its
+training source is used. Its auxiliary window-validation source is never
+relabeled as holistic capture data.
+
+Its `val` row has exactly `kind/path/sha256/source_census_sha256/`
+`upstream_manifest_sha256`, with kind `capture-validation-storage-v1`. The host
+loads the actual storage bytes with the retained expected digest and checks
+the reconstructed source type, `val` split, complete census and upstream
+manifest. The runtime receives this `CaptureValidationSource` unchanged.
+Base and residual runs, including both resume paths, use the same composition.
+Checkpoint and scoring-time census binding remain in the existing training API.
+
+Before constructing the backend, the host streams every actual training batch
+and rejects actor/track or caption commitments shared with capture validation.
+Prepared v2 additionally compares its documented window-positive IDs with
+capture window commitments; v1 arbitrary positive families are not falsely
+treated as window IDs. Source manifests/censuses are checked before and after
+the scan. The fixed scan order uses local deterministic source RNG and preserves
+Python, NumPy and Torch global RNG. Actor commitments are not participant IDs:
+this check complements, but never replaces, the authenticated participant split
+audit.
+
+Preflight materializes the bounded capture source and streams the training
+tree once. The single-batch byte limit still applies; train scan I/O is linear
+in total artifact bytes, and there is no new aggregate train-byte limit.
+Capture identity sets are linear in the materialized validation census. This
+operation neither loads CLIP nor opens the sealed test split. Direct legacy
+v1/v2 window-task dispatch retains its prior behavior.
+
 `run-base` uses the formal seed-bound B0--B2 constructor and
 `PhaseSetTrainingRuntime`.  Its checkpoint directory must be
 `<attempt-root>/<attempt-id>/model-checkpoints`, allowing the harness to build
@@ -156,13 +197,10 @@ rights assertion when Embody approval is unknown.
 - The Embody-format conversion is outside this harness.  It must produce the
   exact prepared index/split/NPZ seam above and bind it to the authenticated
   prepared-data receipt.
-- The training API now accepts the concrete val-only capture source described
-  in [capture validation](CAPTURE_VALIDATION.md), with complete-window pooling
-  and checkpoint-census binding. This host's v1/v2 on-disk prepared loaders still
-  return window sources. Their positive families and repeating actor-set
-  commitments cannot substitute for the main holistic capture gallery. The
-  private-host capture-source disk composition remains to be connected before
-  formal base selection on that task.
+- The main capture disk composition above is implemented. Producing its inputs
+  from licensed captures and verified official holistic captions remains the
+  upstream preparation responsibility. Auxiliary window positive families and
+  repeating actor-set commitments never substitute for actual capture row IDs.
 - `run-residual` is wired through the strict qualified-base loader, canonical
   periodic-cache record, energy floors, canonical all-system capacity audit,
   closed residual constructor, and the same attempt ledger. Residual resume
@@ -212,3 +250,23 @@ The subsequent v2 prepared-source integration passed 94 focused server tests
 and a separate complete suite of 964 tests, 2 skipped, and 39 subtests. These
 include actual malformed numeric payloads and manifest/index replacement
 cases; they do not assert a completed preparation command or a real-data run.
+
+The complete-capture host composition subsequently passed 96 focused tests
+and 1070 complete Linux server tests, with 2 skips and 39 subtests. A later
+storage-portability correction passed 103 focused / 1077 complete tests,
+again with 2 skips and 39 subtests, plus the unchanged official CLIP forward
+and disk-restoration observation. Source comparisons passed throughout.
+The new tests include canonical index bytes, real train/validation commitment
+overlap, unchanged ambient RNG, and exact dispatch through base/residual/resume.
+They use explicit analytic fixtures and do not establish data access or a
+completed real training run.
+
+The portability correction follows observed failures on both Windows CI
+versions at the preceding capture-storage commit. On the inspected Windows
+runtime, path stat and descriptor stat returned different `ctime` semantics
+for one unchanged file. Cross-interface identity checks now compare device,
+inode, size and modification time; each interface separately retains its full
+before/after identity check including `ctime`. Content digests, bounded reads,
+regular-file and symlink checks remain mandatory. Tests simulate the stable
+cross-interface difference and reject drift within either interface. Windows
+CI for the correction is a separate external acceptance check.
