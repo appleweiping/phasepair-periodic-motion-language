@@ -1234,6 +1234,9 @@ class CheckpointArtifact:
     global_step: int
 
 
+CheckpointObserver = Callable[[CheckpointArtifact, Literal["update", "validation"]], None]
+
+
 @dataclass(frozen=True, slots=True)
 class TrainingReport:
     """Local runtime report; it intentionally cannot attest external execution."""
@@ -2816,6 +2819,7 @@ class PhaseSetTrainingRuntime:
         checkpoint_directory: str | Path,
         *,
         initialization_binding: TrainingInitializationBinding | None = None,
+        checkpoint_observer: CheckpointObserver | None = None,
     ) -> None:
         if type(config) is not TrainingConfig:
             raise TypeError("config must be exact TrainingConfig")
@@ -2827,6 +2831,8 @@ class PhaseSetTrainingRuntime:
             TrainingInitializationBinding
         ):
             raise TypeError("initialization_binding must be exact TrainingInitializationBinding")
+        if checkpoint_observer is not None and not callable(checkpoint_observer):
+            raise TypeError("checkpoint_observer must be callable or None")
         if not config.synthetic_contract and initialization_binding is None:
             raise TrainingRuntimeError(
                 "formal training requires a seed-bound initialization binding"
@@ -2882,6 +2888,7 @@ class PhaseSetTrainingRuntime:
         self.system.to(self.device)
         self.precision = resolve_precision(config)
         self.checkpoint_directory = root.resolve()
+        self.checkpoint_observer = checkpoint_observer
         self._optimizer: torch.optim.AdamW | None = None
         self._scheduler: torch.optim.lr_scheduler.LambdaLR | None = None
         self._state = _CursorState()
@@ -3056,6 +3063,8 @@ class PhaseSetTrainingRuntime:
         self._latest = artifact
         if self._state.best_checkpoint_name == name:
             self._state.best_checkpoint_sha256 = artifact.sha256
+        if self.checkpoint_observer is not None:
+            self.checkpoint_observer(artifact, reason)
         return artifact
 
     def _restore_checkpoint(
@@ -3600,6 +3609,7 @@ __all__ = [
     "BaseRetrievalSystem",
     "CHECKPOINT_SCHEMA",
     "CheckpointArtifact",
+    "CheckpointObserver",
     "EFFECTIVE_GLOBAL_BATCH",
     "GRADIENT_CLIP_NORM",
     "OFFICIAL_SEEDS",
