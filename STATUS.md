@@ -15,17 +15,28 @@ evidence, not training results or scientific claims.
 
 - Strict known-host SSH login to the registered host now succeeds. The initial
   read-only inventory is complete. Existing workloads were not interrupted.
-- A separate data-volume Python environment is being built; CUDA libraries
-  are still downloading. No GPU qualification or real training has passed.
+- A separate data-volume Python 3.12.12 / NumPy 2.4.6 / Torch 2.12.0+cu126
+  environment is installed with a clean dependency check. The complete Linux
+  CPU regression passed: 900 tests, 1 skipped, and 39 subtests, in 311.13 s.
+  This includes synthetic model/lifecycle checks, not main-data training.
+- A separately bounded shared-GPU functionality probe passed FP64 forward and
+  FP32 forward/backward using 8x8 tensors. It did not stop existing workloads
+  and does not qualify BF16, model execution, performance, or the full runtime.
 - The native Embody loader and concrete licensed SMPL-X body-22 evaluator are
-  implemented. Six adapter contract tests passed on Linux/Python 3.12.12/
+  implemented. Seven adapter contract tests passed on Linux/Python 3.12.12/
   NumPy 2.4.6; these use explicit fixtures, not licensed assets or main data.
 - Neither Embody approval nor a licensed neutral model has been observed.
-  Open-license Multi-TPC acquisition is underway only for the registered
-  supplementary conversation task, not as replacement confirmatory data.
-- An actual Linux probe found last-bit formula-replay drift in both Morlet
-  banks. The original frozen kernel digests remain unchanged; portability is
-  being repaired and must pass server-side numerical tests before training.
+  Open-license Multi-TPC acquisition completed with its official byte count and
+  MD5 verified. Its archive inventory has 322 files; format conversion remains
+  under audit. It is supplementary conversation data, never replacement
+  confirmatory data. The pinned CLIP snapshot's eight files also match the
+  previously acquired official SHA-256 values; model qualification is separate.
+- Native Linux last-bit Morlet formula drift is repaired using strictly
+  verified canonical coefficient bytes, while preserving both original hashes.
+  Windows still requires its original exact formula digest; Linux requires its
+  measured exact native formula fingerprint plus a bounded tap comparison.
+  See [Morlet portability](docs/MORLET_PORTABILITY.md). POSIX checkpoint cleanup
+  also now pins its inode so a concurrently replaced file is not deleted.
 - The current no-result manuscript now builds using the hash-pinned official
   ICASSP 2027 template: five pages, technical content through page four,
   references-only page five, all fonts embedded, no unresolved citations or

@@ -37,7 +37,8 @@ multi-person skeleton sequence
   an independently hashed 20-Hz formula bank after resampling. This is a
   compatibility boundary, not a claim that the two kernel banks or full models
   are bitwise identical. See the
-  [20-Hz rate contract](docs/PHASESET_20HZ_MORLET_CONTRACT.md).
+  [20-Hz rate contract](docs/PHASESET_20HZ_MORLET_CONTRACT.md) and
+  [canonical-byte portability policy](docs/MORLET_PORTABILITY.md).
 
 ## Current milestone
 
