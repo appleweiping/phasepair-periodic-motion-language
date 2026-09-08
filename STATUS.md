@@ -17,9 +17,10 @@ evidence, not training results or scientific claims.
   read-only inventory is complete. Existing workloads were not interrupted.
 - A separate data-volume Python 3.12.12 / NumPy 2.4.6 / Torch 2.12.0+cu126
   environment is installed with a clean dependency check. The complete Linux
-  CPU regression including capture-level training selection passed:
-  1012 tests, 2 skipped, and 39 subtests, in 286.46 s. Its focused integration
-  passed 84 tests and 6 subtests. Source bytes were unchanged before and after
+  CPU regression including capture storage and frozen-text restoration passed:
+  1043 tests, 2 skipped, and 39 subtests, in 298.12 s. Its focused integration
+  passed 110 tests. The preceding capture-training integration passed 1012
+  complete / 84 focused tests and 6 focused subtests. Source bytes were unchanged before and after
   both suites. The prior prepared-data v2 host integration passed 94 focused /
   964 complete tests. The prior residual-resume integration
   passed 948 tests and 39 subtests.
@@ -54,8 +55,17 @@ evidence, not training results or scientific claims.
   core or an optimizer. A subsequent B0 repeat stopped before model creation
   for insufficient free memory. After memory recovered, a distinct retry chain
   passed retrieval/B0/B1/B2 with the same reviewed source and tolerance; the
-  original resource failure remains preserved. Full-training and BF16
+  original resource failure remains preserved. Formal-training and BF16
   qualification remain pending. See [runtime policy](docs/FROZEN_MHA_RUNTIME.md).
+- Full-width FP32 CUDA lifecycle checks subsequently passed for B0/B1/B2 and
+  system 08: width 512, 8 heads, FFN 2048, full 200-frame body22 windows and analytic
+  K2/K3 groups. Three uninterrupted optimizer updates exactly matched a newly
+  constructed runtime restoring update 2 and completing update 3, including
+  model, optimizer, scheduler, RNG, cursor and manifests. All four lanes stayed
+  within a 2 GiB allocator cap; B2 retained all four social-temporal layers.
+  These bounded fixtures used effective batch 2, completed no epoch, selected
+  no validation checkpoint, and are not formal runs or performance benchmarks.
+  See [observed lifecycle scope](docs/CUDA_LIFECYCLE_OBSERVATION.md).
 - The native Embody loader and concrete licensed SMPL-X body-22 evaluator are
   implemented. Seven adapter contract tests passed on Linux/Python 3.12.12/
   NumPy 2.4.6; these use explicit fixtures, not licensed assets or main data.
@@ -81,6 +91,16 @@ evidence, not training results or scientific claims.
   Private-host disk composition
   and licensed source/caption provenance remain incomplete. See
   [capture validation](docs/CAPTURE_VALIDATION.md).
+- A bounded validation-only capture storage writer/reader now preserves the
+  complete window plan, original padding, variable caption counts and original
+  frozen text receipts. Receipt-bound restoration performs no CLIP inference.
+  An actual official-model cache probe caught a snapshot-file ordering bug that
+  the initial structural fixtures had missed. The failed attempt is preserved;
+  the corrected source passed the 110 / 1043 tests above plus three official
+  forwards and two exact disk-restoration roundtrips, with no extra forward.
+  The original output goldens and observed CPU Torch RNG were unchanged.
+  Storage is not a rights, annotation, split or anonymization proof. See
+  [capture storage](docs/CAPTURE_PREPARED_STORAGE.md).
 - Neither Embody approval nor a licensed neutral model has been observed.
   Open-license Multi-TPC acquisition completed with its official byte count and
   MD5 verified. Its archive inventory has 322 files. The bounded audit confirms

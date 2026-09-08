@@ -232,3 +232,34 @@ CLIP forwards passed. Both output digests above, repeated embedding equality,
 and caller RNG were unchanged. The adapter receipt correctly records the new
 training and adapter source identities; no golden was regenerated. This is a
 source-bound CPU feature-path requalification, not a real-data training result.
+
+## Receipt-bound disk restoration
+
+`rehydrate_frozen_clip_text_batch` restores an already encoded batch from its
+owned CPU float32 features and complete original canonical JSON receipt. The
+caller supplies the independently retained expected receipt digest. Closed
+field/type validation checks all official file pins, historical source/runtime
+manifests, caption lineage, chunk ranges, cache identity, per-row feature hashes
+and the complete feature hash. It does not load CLIP or run inference. A
+historical receipt is not rewritten to claim today's encoding source.
+
+The first separate real-model restoration probe found a snapshot-order bug:
+the live encoder records files in filename order, whereas restoration compared
+against pin declaration order. Unit fixtures had repeated that wrong ordering.
+The failed attempt is retained. Restoration and fixtures were corrected to the
+encoder's actual ordering; a negative case now rejects declaration-order rows.
+No official pin, live encoding behavior or output golden was changed.
+
+The corrected integration passed110 focused tests and1043 complete tests,
+2 existing skips and39 subtests. Three subsequent actual official forwards
+preserved both original output digests above. Two separately persisted cache
+batches then restored exact features, lineage, complete receipts and cache
+keys, with no extra forward and unchanged observed CPU Torch RNG state.
+Source comparisons passed, and all44 receipt members were independently
+rehashed after transfer. The actual cache-probe private receipt commitment is
+`b8dfe62f3773f81ff117d31da703cf60130eaf0b6890407bc203cdff35bbd2ac`.
+Private cache payloads and raw operational receipts are not public assets.
+
+See [prepared capture storage](CAPTURE_PREPARED_STORAGE.md) for the bounded
+on-disk consumer. Neither restoration nor a matching receipt proves caption
+rights, official annotation identity, participant-disjointness or model quality.

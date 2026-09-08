@@ -42,6 +42,7 @@ MAX_BATCH_SIZE: Final = 256
 MAX_CAPTIONS: Final = 16_384
 MAX_CAPTION_UTF8_BYTES: Final = 16_384
 MAX_TOTAL_CAPTION_UTF8_BYTES: Final = 16 * 1024 * 1024
+_MAX_REHYDRATION_RECEIPT_BYTES: Final = 32 * 1024 * 1024
 AUTHORITY: Final = 0
 PRODUCTION: Final = False
 TRAINING_AUTHORIZED: Final = False
@@ -983,6 +984,602 @@ class FrozenClipTextBatch:
         )
 
 
+def _rehydration_unique_object(
+    pairs: list[tuple[str, object]],
+) -> dict[str, object]:
+    value: dict[str, object] = {}
+    for key, item in pairs:
+        if type(key) is not str or key in value:
+            _hold("HOLD_REHYDRATION_RECEIPT_JSON")
+        value[key] = item
+    return value
+
+
+def _rehydration_reject_constant(_value: str) -> object:
+    _hold("HOLD_REHYDRATION_RECEIPT_JSON")
+
+
+def _rehydration_closed_dict(
+    value: object,
+    keys: frozenset[str],
+    code: str,
+) -> dict[str, object]:
+    if type(value) is not dict or set(value) != keys:
+        _hold(code)
+    return value
+
+
+def _rehydration_sha256(value: object, code: str) -> str:
+    if (
+        type(value) is not str
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        _hold(code)
+    return value
+
+
+def _rehydration_positive_int(value: object, maximum: int, code: str) -> int:
+    if type(value) is not int or not 1 <= value <= maximum:
+        _hold(code)
+    return value
+
+
+def _rehydration_exact_literals(
+    value: object,
+    expected: dict[str, object],
+    code: str,
+) -> dict[str, object]:
+    checked = _rehydration_closed_dict(value, frozenset(expected), code)
+    if any(
+        type(checked[key]) is not type(item) or checked[key] != item
+        for key, item in expected.items()
+    ):
+        _hold(code)
+    return checked
+
+
+def _rehydration_caption_rows(
+    value: object,
+    *,
+    count: int,
+) -> tuple[
+    tuple[tuple[int, str, str, int, int, bool, str, str, str], ...],
+    tuple[bytes, ...],
+]:
+    if type(value) is not list or len(value) != count:
+        _hold("HOLD_REHYDRATION_CAPTION_ROWS")
+    keys = frozenset(
+        {
+            "attention_mask_int64_sha256",
+            "caption_commitment",
+            "caption_utf8_sha256",
+            "embedding_float32_sha256",
+            "encoded_token_count_with_special_tokens",
+            "index",
+            "input_ids_int64_sha256",
+            "original_token_count_with_special_tokens",
+            "truncated",
+        }
+    )
+    rows: list[tuple[int, str, str, int, int, bool, str, str, str]] = []
+    lineage: list[bytes] = []
+    for index, item in enumerate(value):
+        row = _rehydration_closed_dict(
+            item,
+            keys,
+            "HOLD_REHYDRATION_CAPTION_ROWS",
+        )
+        if type(row["index"]) is not int or row["index"] != index:
+            _hold("HOLD_REHYDRATION_CAPTION_ROWS")
+        commitment = _rehydration_sha256(
+            row["caption_commitment"],
+            "HOLD_REHYDRATION_LINEAGE",
+        )
+        text_digest = _rehydration_sha256(
+            row["caption_utf8_sha256"],
+            "HOLD_REHYDRATION_CAPTION_ROWS",
+        )
+        input_digest = _rehydration_sha256(
+            row["input_ids_int64_sha256"],
+            "HOLD_REHYDRATION_CAPTION_ROWS",
+        )
+        mask_digest = _rehydration_sha256(
+            row["attention_mask_int64_sha256"],
+            "HOLD_REHYDRATION_CAPTION_ROWS",
+        )
+        output_digest = _rehydration_sha256(
+            row["embedding_float32_sha256"],
+            "HOLD_REHYDRATION_OUTPUT",
+        )
+        original_count = _rehydration_positive_int(
+            row["original_token_count_with_special_tokens"],
+            MAX_CAPTION_UTF8_BYTES + 2,
+            "HOLD_REHYDRATION_CAPTION_ROWS",
+        )
+        encoded_count = row["encoded_token_count_with_special_tokens"]
+        truncated = row["truncated"]
+        if (
+            original_count < 2
+            or type(encoded_count) is not int
+            or encoded_count != min(original_count, TOKEN_LENGTH)
+            or type(truncated) is not bool
+            or truncated != (original_count > TOKEN_LENGTH)
+        ):
+            _hold("HOLD_REHYDRATION_CAPTION_ROWS")
+        rows.append(
+            (
+                index,
+                commitment,
+                text_digest,
+                original_count,
+                encoded_count,
+                truncated,
+                input_digest,
+                mask_digest,
+                output_digest,
+            )
+        )
+        lineage.append(bytes.fromhex(commitment))
+    checked_lineage = tuple(lineage)
+    if len(set(checked_lineage)) != count:
+        _hold("HOLD_REHYDRATION_LINEAGE")
+    return tuple(rows), checked_lineage
+
+
+def _rehydration_chunk_ranges(
+    value: object,
+    *,
+    count: int,
+    batch_size: int,
+) -> tuple[tuple[int, int], ...]:
+    if type(value) is not list:
+        _hold("HOLD_REHYDRATION_CHUNKS")
+    expected = tuple(
+        (start, min(start + batch_size, count))
+        for start in range(0, count, batch_size)
+    )
+    checked: list[tuple[int, int]] = []
+    for item in value:
+        if (
+            type(item) is not list
+            or len(item) != 2
+            or type(item[0]) is not int
+            or type(item[1]) is not int
+        ):
+            _hold("HOLD_REHYDRATION_CHUNKS")
+        checked.append((item[0], item[1]))
+    if tuple(checked) != expected:
+        _hold("HOLD_REHYDRATION_CHUNKS")
+    return tuple(checked)
+
+
+def _rehydration_snapshot(
+    value: object,
+) -> tuple[tuple[str, int, str], ...]:
+    snapshot = _rehydration_closed_dict(
+        value,
+        frozenset({"file_count", "files", "manifest_sha256"}),
+        "HOLD_REHYDRATION_SNAPSHOT",
+    )
+    files = snapshot["files"]
+    if type(files) is not list or len(files) != len(_OFFICIAL_PINNED_FILES):
+        _hold("HOLD_REHYDRATION_SNAPSHOT")
+    rows: list[tuple[str, int, str]] = []
+    for item in files:
+        row = _rehydration_closed_dict(
+            item,
+            frozenset({"bytes", "name", "sha256"}),
+            "HOLD_REHYDRATION_SNAPSHOT",
+        )
+        name = row["name"]
+        size = row["bytes"]
+        if type(name) is not str or not name or type(size) is not int or size < 1:
+            _hold("HOLD_REHYDRATION_SNAPSHOT")
+        rows.append(
+            (
+                name,
+                size,
+                _rehydration_sha256(
+                    row["sha256"],
+                    "HOLD_REHYDRATION_SNAPSHOT",
+                ),
+            )
+        )
+    checked = tuple(rows)
+    if (
+        type(snapshot["file_count"]) is not int
+        or snapshot["file_count"] != len(checked)
+        or checked != tuple(sorted(_OFFICIAL_PINNED_FILES))
+        or _rehydration_sha256(
+            snapshot["manifest_sha256"],
+            "HOLD_REHYDRATION_SNAPSHOT",
+        )
+        != _snapshot_manifest_sha256(checked)
+    ):
+        _hold("HOLD_REHYDRATION_SNAPSHOT")
+    return checked
+
+
+def _rehydration_source(
+    value: object,
+) -> tuple[tuple[str, int, str], ...]:
+    source = _rehydration_closed_dict(
+        value,
+        frozenset({"files", "manifest_sha256"}),
+        "HOLD_REHYDRATION_SOURCE",
+    )
+    files = source["files"]
+    if type(files) is not list or len(files) != 4:
+        _hold("HOLD_REHYDRATION_SOURCE")
+    rows: list[tuple[str, int, str]] = []
+    for item in files:
+        row = _rehydration_closed_dict(
+            item,
+            frozenset({"bytes", "label", "sha256"}),
+            "HOLD_REHYDRATION_SOURCE",
+        )
+        label = row["label"]
+        size = row["bytes"]
+        if type(label) is not str or not label or type(size) is not int or size < 1:
+            _hold("HOLD_REHYDRATION_SOURCE")
+        rows.append(
+            (
+                label,
+                size,
+                _rehydration_sha256(
+                    row["sha256"],
+                    "HOLD_REHYDRATION_SOURCE",
+                ),
+            )
+        )
+    checked = tuple(rows)
+    if (
+        checked[:2] != _EXPECTED_SOURCE_FILES[:2]
+        or checked[2][0] != "phaseset_core.training"
+        or checked[3][0] != "phaseset_core.frozen_clip_text"
+        or _rehydration_sha256(
+            source["manifest_sha256"],
+            "HOLD_REHYDRATION_SOURCE",
+        )
+        != _source_manifest_sha256(checked)
+    ):
+        _hold("HOLD_REHYDRATION_SOURCE")
+    return checked
+
+
+def _rehydration_runtime(value: object) -> tuple[tuple[str, str], ...]:
+    runtime = _rehydration_closed_dict(
+        value,
+        frozenset(key for key, _item in _EXPECTED_RUNTIME),
+        "HOLD_REHYDRATION_RUNTIME",
+    )
+    if any(type(item) is not str for item in runtime.values()):
+        _hold("HOLD_REHYDRATION_RUNTIME")
+    checked = tuple(sorted(runtime.items()))
+    if checked != _EXPECTED_RUNTIME:
+        _hold("HOLD_REHYDRATION_RUNTIME")
+    return checked
+
+
+def _rehydration_cache_key(
+    *,
+    batch_size: int,
+    caption_rows: tuple[
+        tuple[int, str, str, int, int, bool, str, str, str], ...
+    ],
+    chunk_ranges: tuple[tuple[int, int], ...],
+    runtime_manifest_sha256: str,
+    snapshot_manifest_sha256: str,
+    source_manifest_sha256: str,
+) -> str:
+    payload = {
+        "batch_size": batch_size,
+        "caption_rows": [
+            {
+                "attention_mask_int64_sha256": row[7],
+                "caption_utf8_sha256": row[2],
+                "encoded_token_count_with_special_tokens": row[4],
+                "index": row[0],
+                "input_ids_int64_sha256": row[6],
+                "original_token_count_with_special_tokens": row[3],
+                "truncated": row[5],
+            }
+            for row in caption_rows
+        ],
+        "chunk_ranges": [list(value) for value in chunk_ranges],
+        "method_id": METHOD_ID,
+        "model_id": MODEL_ID,
+        "revision": REVISION,
+        "runtime_manifest_sha256": runtime_manifest_sha256,
+        "snapshot_manifest_sha256": snapshot_manifest_sha256,
+        "source_manifest_sha256": source_manifest_sha256,
+        "token_length": TOKEN_LENGTH,
+        "truncation": True,
+    }
+    return hashlib.sha256(_canonical_json(payload)).hexdigest()
+
+
+def _rehydrate_frozen_clip_text_batch(
+    embeddings: object,
+    *,
+    receipt_json_bytes: object,
+    expected_receipt_sha256: object,
+) -> FrozenClipTextBatch:
+    if (
+        type(receipt_json_bytes) is not bytes
+        or not 1 <= len(receipt_json_bytes) <= _MAX_REHYDRATION_RECEIPT_BYTES
+    ):
+        _hold("HOLD_REHYDRATION_RECEIPT_BYTES")
+    expected_digest = _rehydration_sha256(
+        expected_receipt_sha256,
+        "HOLD_REHYDRATION_EXPECTED_RECEIPT",
+    )
+    if hashlib.sha256(receipt_json_bytes).hexdigest() != expected_digest:
+        _hold("HOLD_REHYDRATION_EXPECTED_RECEIPT")
+    try:
+        parsed = json.loads(
+            receipt_json_bytes.decode("ascii"),
+            object_pairs_hook=_rehydration_unique_object,
+            parse_constant=_rehydration_reject_constant,
+        )
+    except FrozenClipTextAdapterError:
+        raise
+    except (UnicodeError, TypeError, ValueError, OverflowError):
+        _hold("HOLD_REHYDRATION_RECEIPT_JSON")
+    if receipt_json_bytes != _canonical_json(parsed) + b"\n":
+        _hold("HOLD_REHYDRATION_RECEIPT_JSON")
+    receipt_value = _rehydration_closed_dict(
+        parsed,
+        frozenset(
+            {
+                "authority",
+                "batch_size",
+                "caption_count",
+                "caption_rows",
+                "chunk_ranges",
+                "embedding_selection",
+                "frozen_embedding_cache_key_sha256",
+                "live_model_manifest_sha256",
+                "method_id",
+                "model_id",
+                "output",
+                "production",
+                "revision",
+                "runtime",
+                "runtime_manifest_sha256",
+                "schema",
+                "snapshot",
+                "source",
+                "status",
+                "tokenization",
+                "training_authorized",
+            }
+        ),
+        "HOLD_REHYDRATION_RECEIPT_SCHEMA",
+    )
+    literals = {
+        "authority": AUTHORITY,
+        "embedding_selection": "official_pretrained_text_projection_raw_float32",
+        "method_id": METHOD_ID,
+        "model_id": MODEL_ID,
+        "production": PRODUCTION,
+        "revision": REVISION,
+        "schema": "phaseset-frozen-clip-text-receipt-v1",
+        "status": "ENCODED_AUTHORITY0",
+        "training_authorized": TRAINING_AUTHORIZED,
+    }
+    if any(
+        type(receipt_value[key]) is not type(item) or receipt_value[key] != item
+        for key, item in literals.items()
+    ):
+        _hold("HOLD_REHYDRATION_RECEIPT_SCHEMA")
+    _rehydration_exact_literals(
+        receipt_value["tokenization"],
+        {
+            "add_special_tokens": True,
+            "long_caption_policy": "clip_native_truncate_77",
+            "max_tokens_including_special_tokens": TOKEN_LENGTH,
+            "padding": "max_length",
+            "preserve_terminal_eos": True,
+            "truncation": True,
+        },
+        "HOLD_REHYDRATION_TOKENIZATION",
+    )
+    caption_rows_value = receipt_value["caption_rows"]
+    if type(caption_rows_value) is not list:
+        _hold("HOLD_REHYDRATION_CAPTION_ROWS")
+    count = len(caption_rows_value)
+    if not 1 <= count <= MAX_CAPTIONS:
+        _hold("HOLD_REHYDRATION_CAPTION_ROWS")
+    if type(receipt_value["caption_count"]) is not int or receipt_value[
+        "caption_count"
+    ] != count:
+        _hold("HOLD_REHYDRATION_CAPTION_ROWS")
+    batch_size = _rehydration_positive_int(
+        receipt_value["batch_size"],
+        MAX_BATCH_SIZE,
+        "HOLD_REHYDRATION_CHUNKS",
+    )
+    caption_rows, lineage = _rehydration_caption_rows(
+        caption_rows_value,
+        count=count,
+    )
+    chunk_ranges = _rehydration_chunk_ranges(
+        receipt_value["chunk_ranges"],
+        count=count,
+        batch_size=batch_size,
+    )
+    output = _rehydration_closed_dict(
+        receipt_value["output"],
+        frozenset(
+            {
+                "bytes",
+                "device",
+                "dtype",
+                "finite",
+                "requires_grad",
+                "sha256",
+                "shape",
+                "stride",
+            }
+        ),
+        "HOLD_REHYDRATION_OUTPUT",
+    )
+    if (
+        type(output["bytes"]) is not int
+        or output["bytes"] != count * EMBEDDING_DIM * 4
+        or type(output["device"]) is not str
+        or output["device"] != "cpu"
+        or type(output["dtype"]) is not str
+        or output["dtype"] != "torch.float32"
+        or type(output["finite"]) is not bool
+        or output["finite"] is not True
+        or type(output["requires_grad"]) is not bool
+        or output["requires_grad"] is not False
+        or type(output["shape"]) is not list
+        or output["shape"] != [count, EMBEDDING_DIM]
+        or any(type(item) is not int for item in output["shape"])
+        or type(output["stride"]) is not list
+        or output["stride"] != [EMBEDDING_DIM, 1]
+        or any(type(item) is not int for item in output["stride"])
+    ):
+        _hold("HOLD_REHYDRATION_OUTPUT")
+    output_sha256 = _rehydration_sha256(
+        output["sha256"],
+        "HOLD_REHYDRATION_OUTPUT",
+    )
+    try:
+        import torch
+    except Exception:
+        _hold("HOLD_REHYDRATION_RUNTIME_IMPORT")
+    if (
+        type(embeddings) is not torch.Tensor
+        or embeddings.dtype != torch.float32
+        or embeddings.device.type != "cpu"
+        or tuple(embeddings.shape) != (count, EMBEDDING_DIM)
+        or tuple(embeddings.stride()) != (EMBEDDING_DIM, 1)
+        or embeddings.requires_grad
+        or not embeddings.is_contiguous()
+    ):
+        _hold("HOLD_REHYDRATION_OUTPUT")
+    try:
+        frozen_embeddings = embeddings.detach().clone().contiguous()
+    except Exception:
+        _hold("HOLD_REHYDRATION_OUTPUT")
+    if not bool(torch.isfinite(frozen_embeddings).all().item()):
+        _hold("HOLD_REHYDRATION_OUTPUT")
+    output_bytes = _tensor_bytes(frozen_embeddings)
+    if (
+        len(output_bytes) != output["bytes"]
+        or hashlib.sha256(output_bytes).hexdigest() != output_sha256
+    ):
+        _hold("HOLD_REHYDRATION_OUTPUT")
+    row_bytes = EMBEDDING_DIM * 4
+    if any(
+        hashlib.sha256(
+            output_bytes[index * row_bytes : (index + 1) * row_bytes]
+        ).hexdigest()
+        != row[8]
+        for index, row in enumerate(caption_rows)
+    ):
+        _hold("HOLD_REHYDRATION_OUTPUT")
+    snapshot_files = _rehydration_snapshot(receipt_value["snapshot"])
+    source_files = _rehydration_source(receipt_value["source"])
+    runtime_identity = _rehydration_runtime(receipt_value["runtime"])
+    snapshot_manifest = _snapshot_manifest_sha256(snapshot_files)
+    source_manifest = _source_manifest_sha256(source_files)
+    runtime_manifest = _runtime_manifest_sha256(runtime_identity)
+    if (
+        _rehydration_sha256(
+            receipt_value["snapshot"]["manifest_sha256"],
+            "HOLD_REHYDRATION_SNAPSHOT",
+        )
+        != snapshot_manifest
+        or _rehydration_sha256(
+            receipt_value["source"]["manifest_sha256"],
+            "HOLD_REHYDRATION_SOURCE",
+        )
+        != source_manifest
+        or _rehydration_sha256(
+            receipt_value["runtime_manifest_sha256"],
+            "HOLD_REHYDRATION_RUNTIME",
+        )
+        != runtime_manifest
+    ):
+        _hold("HOLD_REHYDRATION_PROVENANCE")
+    cache_key = _rehydration_sha256(
+        receipt_value["frozen_embedding_cache_key_sha256"],
+        "HOLD_REHYDRATION_CACHE_KEY",
+    )
+    if cache_key != _rehydration_cache_key(
+        batch_size=batch_size,
+        caption_rows=caption_rows,
+        chunk_ranges=chunk_ranges,
+        runtime_manifest_sha256=runtime_manifest,
+        snapshot_manifest_sha256=snapshot_manifest,
+        source_manifest_sha256=source_manifest,
+    ):
+        _hold("HOLD_REHYDRATION_CACHE_KEY")
+    live_model_manifest = _rehydration_sha256(
+        receipt_value["live_model_manifest_sha256"],
+        "HOLD_REHYDRATION_PROVENANCE",
+    )
+    receipt = FrozenClipTextReceipt(
+        batch_size=batch_size,
+        caption_rows=caption_rows,
+        chunk_ranges=chunk_ranges,
+        frozen_embedding_cache_key_sha256=cache_key,
+        live_model_manifest_sha256=live_model_manifest,
+        output_bytes=len(output_bytes),
+        output_sha256=output_sha256,
+        output_shape=(count, EMBEDDING_DIM),
+        output_stride=(EMBEDDING_DIM, 1),
+        runtime_identity=runtime_identity,
+        runtime_manifest_sha256=runtime_manifest,
+        snapshot_files=snapshot_files,
+        snapshot_manifest_sha256=snapshot_manifest,
+        source_files=source_files,
+        source_manifest_sha256=source_manifest,
+    )
+    if (
+        receipt.canonical_json_bytes() != receipt_json_bytes
+        or receipt.sha256 != expected_digest
+    ):
+        _hold("HOLD_REHYDRATION_RECEIPT_REBUILD")
+    return FrozenClipTextBatch(
+        frozen_embeddings,
+        lineage,
+        receipt,
+        _seal=_CONSTRUCTION_SEAL,
+    )
+
+
+def rehydrate_frozen_clip_text_batch(
+    embeddings: Any,
+    *,
+    receipt_json_bytes: bytes,
+    expected_receipt_sha256: str,
+) -> FrozenClipTextBatch:
+    """Restore one exact cached batch without re-running the CLIP text tower.
+
+    ``expected_receipt_sha256`` must come from an independently authenticated
+    prepared-data manifest. Rehydration preserves the original encoding
+    source/runtime identities and grants no data, training, or result authority.
+    """
+
+    try:
+        return _rehydrate_frozen_clip_text_batch(
+            embeddings,
+            receipt_json_bytes=receipt_json_bytes,
+            expected_receipt_sha256=expected_receipt_sha256,
+        )
+    except FrozenClipTextAdapterError:
+        raise
+    except Exception:
+        raise FrozenClipTextAdapterError("HOLD_UNEXPECTED_REHYDRATION") from None
+
+
 class FrozenClipTextAdapter:
     """Opaque frozen CLIP text tower loaded only from the pinned local snapshot."""
 
@@ -1333,4 +1930,5 @@ __all__ = [
     "REVISION",
     "TRAINING_AUTHORIZED",
     "load_frozen_clip_text_adapter",
+    "rehydrate_frozen_clip_text_batch",
 ]
